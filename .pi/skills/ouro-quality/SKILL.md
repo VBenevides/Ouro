@@ -1,0 +1,1 @@
+../../../pi-ouro/skills/ouro-quality/SKILL.md

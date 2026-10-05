@@ -1,0 +1,23 @@
+{
+  "name": "pi-ouro",
+  "version": "0.1.0",
+  "description": "Ouro quality gate extension and skill for Pi",
+  "keywords": [
+    "pi-package"
+  ],
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/ouro.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

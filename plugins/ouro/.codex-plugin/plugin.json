@@ -1,0 +1,18 @@
+{
+  "name": "ouro",
+  "version": "0.1.0",
+  "description": "Run deterministic Ouro quality gates from Codex.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Ouro Quality",
+    "shortDescription": "Assess and remediate quality in the active Codex session.",
+    "longDescription": "Ouro runs deterministic quality checks and returns immutable run paths, reports, and summaries. Codex owns the quality-check and repair loop, edits, tools, permissions, and commits. Only PASS completes authorized remediation; warnings require further work.",
+    "developerName": "Local developer",
+    "category": "Developer Tools",
+    "capabilities": ["Quality gates", "Run reports", "Structured results"],
+    "defaultPrompt": ["Use $ouro-quality to assess this project and report its fresh result.", "Use $ouro-quality to fix quality failures and warnings, then rerun until PASS or a concrete blocker."]
+  }
+}
