@@ -59,7 +59,7 @@ func TestOSRunnerReportsCommandStart(t *testing.T) {
 		Label:    "validation test",
 		Progress: &progress,
 	})
-	if !result.Passed() || progress.String() != "ouro: command started: validation test\n" {
+	if !result.Passed() || !strings.HasPrefix(progress.String(), "ouro: command started: validation test; elapsed=") || !strings.Contains(progress.String(), "command finished: validation test; status=PASS;") {
 		t.Fatalf("unexpected command progress: result=%+v progress=%q", result, progress.String())
 	}
 }

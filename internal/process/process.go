@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -99,13 +98,8 @@ func (OSRunner) Run(parent context.Context, command Command) Result {
 		defer cancel()
 	}
 	cmd := exec.CommandContext(ctx, command.Executable, command.Args...)
-	if command.Progress != nil {
-		label := strings.TrimSpace(command.Label)
-		if label == "" {
-			label = filepath.Base(command.Executable)
-		}
-		_, _ = fmt.Fprintf(command.Progress, "ouro: command started: %s\n", label)
-	}
+	stopProgress := startCommandProgress(ctx, command, 15*time.Second)
+	defer func() { stopProgress(result.Status) }()
 	configureProcess(cmd)
 	cmd.Cancel = func() error { return cancelProcess(cmd) }
 	cmd.WaitDelay = 2 * time.Second
