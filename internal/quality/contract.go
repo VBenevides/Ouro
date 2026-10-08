@@ -283,6 +283,8 @@ type RunResult struct {
 	DiagnosticsOmitted int            `json:"diagnostics_omitted"`
 	Summary            Summary        `json:"summary"`
 	NextSteps          []Action       `json:"next_steps"`
+
+	Prerequisites []PrerequisiteResult `json:"prerequisites,omitempty"`
 }
 
 // IdentityHash returns a stable SHA-256 identity; it does not anonymize inputs.
@@ -560,6 +562,9 @@ func (result RunResult) Validate() error {
 		return err
 	}
 	if err := validateActions(result.NextSteps); err != nil {
+		return err
+	}
+	if err := validatePrerequisites(result); err != nil {
 		return err
 	}
 	if !reflect.DeepEqual(result, normalizeRunResult(result)) {

@@ -56,7 +56,8 @@ func buildStructuredQualityResult(options QualityOptions, execution qualityExecu
 			UnsupportedComponents: countUnsupportedComponents(execution.plan),
 			FindingDeltas:         deltas,
 		},
-		NextSteps: append([]quality.Action(nil), execution.plan.NextSteps...),
+		NextSteps:     append([]quality.Action(nil), execution.plan.NextSteps...),
+		Prerequisites: execution.prerequisites,
 	}
 	return result, nil
 }

@@ -63,6 +63,7 @@ type qualityExecution struct {
 	plan           quality.Plan
 	startedAt      time.Time
 	unavailable    map[string]string
+	prerequisites  []quality.PrerequisiteResult
 }
 
 func RunQuality(ctx context.Context, options QualityOptions) (qualityResult QualityResult, runErr error) {
@@ -361,6 +362,7 @@ func executeQualityStages(ctx context.Context, options QualityOptions, stages []
 	runner := process.ProgressRunner{Runner: options.Runner, Writer: options.Progress}
 	if options.CheckReadiness {
 		execution.results, execution.unavailable = checkQualityReadiness(ctx, options, stages, plan)
+		execution.prerequisites = qualityPrerequisites(plan, execution.unavailable)
 	}
 	executeFormattingStages(ctx, options, stages, runner, plan, &execution)
 	var executionErr error
