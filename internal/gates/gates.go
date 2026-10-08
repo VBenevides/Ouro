@@ -171,7 +171,11 @@ func classifyGateResult(result process.Result, gate Gate) (Status, string) {
 		return Pass, "command completed successfully"
 	}
 	if result.Status == process.StatusUnavailable {
-		return Skipped, "gate executable unavailable: " + redactGateOutput(result.Err, gate)
+		executable := "the required executable"
+		if len(gate.Command) > 0 {
+			executable = filepath.Base(gate.Command[0])
+		}
+		return Skipped, "gate executable unavailable: " + redactGateOutput(result.Err, gate) + fmt.Sprintf(". Install %s, make it available on PATH or at the configured path, then run Ouro quality again.", executable)
 	}
 	if result.Status == process.StatusCancelled {
 		return Cancelled, "process cancelled"

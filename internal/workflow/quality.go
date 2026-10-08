@@ -20,17 +20,18 @@ import (
 )
 
 type QualityOptions struct {
-	Root          string
-	RunID         string
-	RunIDReserved bool
-	Stage         string
-	Iteration     int
-	Config        config.Config
-	Runner        process.Runner
-	Ephemeral     bool
-	ExactStage    bool
-	AutoFormat    bool
-	Progress      io.Writer
+	Root           string
+	RunID          string
+	RunIDReserved  bool
+	Stage          string
+	Iteration      int
+	Config         config.Config
+	Runner         process.Runner
+	Ephemeral      bool
+	ExactStage     bool
+	AutoFormat     bool
+	Progress       io.Writer
+	CheckReadiness bool
 }
 
 type QualityResult struct {
@@ -61,6 +62,7 @@ type qualityExecution struct {
 	snapshotAfter  string
 	plan           quality.Plan
 	startedAt      time.Time
+	unavailable    map[string]string
 }
 
 func RunQuality(ctx context.Context, options QualityOptions) (qualityResult QualityResult, runErr error) {
@@ -357,6 +359,9 @@ func executeQualityStages(ctx context.Context, options QualityOptions, stages []
 	}
 	execution.snapshotBefore = "sha256:" + before.Hash
 	runner := process.ProgressRunner{Runner: options.Runner, Writer: options.Progress}
+	if options.CheckReadiness {
+		execution.results, execution.unavailable = checkQualityReadiness(ctx, options, stages, plan)
+	}
 	executeFormattingStages(ctx, options, stages, runner, plan, &execution)
 	var executionErr error
 	for _, stage := range stages {
@@ -440,6 +445,10 @@ func runDeepQuality(ctx context.Context, options QualityOptions, runner process.
 
 func runCodeQLQuality(ctx context.Context, options QualityOptions, runner process.Runner, execution *qualityExecution) error {
 	codeQLConfig := options.Config.Quality.CodeQL
+	if reason := execution.unavailable[readinessKey("codeql", ".")]; reason != "" {
+		execution.results = append(execution.results, unavailableQualityResult(gates.Gate{Name: "codeql", Level: "deep", Category: "security", Required: codeQLConfig.Required, ComponentRoot: ".", Tool: "codeql"}, reason))
+		return nil
+	}
 	codeQLConfig.RunOutputDir = filepath.Join(".ouro", "runs", options.RunID, "analyzers", "codeql")
 	outcome, runErr := gates.RunCodeQL(ctx, options.Root, codeQLConfig, runner, qualityDeclaredOutputs(execution.plan)...)
 	if runErr != nil {
@@ -456,6 +465,10 @@ func runCodeQLQuality(ctx context.Context, options QualityOptions, runner proces
 
 func runSonarQuality(ctx context.Context, options QualityOptions, runner process.Runner, coveragePath string, execution *qualityExecution) error {
 	sonarConfig := options.Config.Quality.Sonar
+	if reason := execution.unavailable[readinessKey("sonar", ".")]; reason != "" {
+		execution.results = append(execution.results, unavailableQualityResult(gates.Gate{Name: "sonar", Level: "deep", Category: "quality", Required: sonarConfig.Required, ComponentRoot: ".", Tool: "sonar"}, reason))
+		return nil
+	}
 	if execution.coverageReady {
 		sonarConfig.GoCoveragePath = coveragePath
 	} else {

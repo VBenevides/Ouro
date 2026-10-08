@@ -36,6 +36,16 @@ requirements, executable readiness, omissions, and unsupported languages. It
 does not run project gates or contact external services. A zero exit means local
 preflight is complete; it is not a quality pass.
 
+Before every quality execution (`fast`, `deep`, or `strict`), Ouro reports
+prerequisite readiness for all selected language-specific and configured checks.
+For missing executables, it instructs you to install the tool and run quality
+again. Deep and strict runs also make bounded, read-only Sonar endpoint and
+authentication requests when Sonar is selected. Unavailable checks are skipped
+with diagnostic reasons while available checks continue;
+required unavailable checks still block a pass. JSON execution writes readiness
+messages to stderr and preserves structured results on stdout. These readiness
+checks do not provision services or prove project permissions or a quality pass.
+
 ## Run quality
 
 `fast`, `deep`, and `strict` are cumulative profiles. Without `--stage`, Ouro

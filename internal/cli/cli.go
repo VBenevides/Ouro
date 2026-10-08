@@ -307,8 +307,11 @@ func runQualityExecution(root string, cfg config.Config, stage, runID string, js
 	if !jsonOutput {
 		progress = out
 	}
+	if jsonOutput {
+		progress = errOut
+	}
 	result, err := workflow.RunQuality(context.Background(), workflow.QualityOptions{
-		Root: root, RunID: runID, RunIDReserved: true, Stage: stage, Iteration: 1, Config: cfg, Ephemeral: true, AutoFormat: false, Progress: progress,
+		Root: root, RunID: runID, RunIDReserved: true, Stage: stage, Iteration: 1, Config: cfg, Ephemeral: true, AutoFormat: false, Progress: progress, CheckReadiness: true,
 	})
 	if result.RunResult != nil {
 		commandResult := qualityplan.BuildCommandResult(
