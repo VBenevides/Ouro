@@ -36,6 +36,83 @@ requirements, executable readiness, omissions, and unsupported languages. It
 does not run project gates or contact external services. A zero exit means local
 preflight is complete; it is not a quality pass.
 
+Before every quality execution (`fast`, `deep`, or `strict`), Ouro reports
+prerequisite readiness for all selected language-specific and configured checks.
+For missing executables, it instructs you to install the tool and run quality
+again. Deep and strict runs also make bounded, read-only Sonar endpoint and
+authentication requests when Sonar is selected. Unavailable checks are skipped
+with diagnostic reasons while available checks continue;
+required unavailable checks still block a pass. JSON execution writes readiness
+messages to stderr and preserves structured results on stdout. These readiness
+checks do not provision services or prove project permissions or a quality pass.
+
+Quality execution handles Ctrl+C and SIGTERM by cancelling active commands and
+persisting an incomplete/cancelled result. On Unix, cancellation terminates the
+command process group. Before gates start, each run records immutable
+`started.json` evidence; this is never a result or a completion claim. A run
+without a valid completed result must be treated as incomplete, not passed.
+SIGKILL, host failure, or power loss cannot be handled by the parent: descendants
+may remain alive and need operator cleanup. On non-Unix platforms, cancellation
+currently stops the direct child only; descendant cleanup is not guaranteed.
+
+Configure `quality.keep_artifacts_window` in `.ouro/config.yaml` to control run
+artifact retention. It defaults to `5`: when a new run starts, Ouro keeps that
+run and the four preceding runs intact. Older completed runs retain only regular
+`.json` files in their run root; analyzer databases, coverage files, Markdown
+reports, and other artifacts are deleted. `completion.json` preserves completion
+and baseline history after the original marker is removed. Set the window to `0`
+to disable cleanup. Negative values are invalid. Unfinished runs and newer
+concurrent runs are not pruned. Cleanup failures stop execution with an error;
+already-removed artifacts cannot be recovered by increasing the window.
+
+CodeQL defaults to a 15-minute overall operation budget, including version
+checks, database creation, and analysis of every selected language. Each
+individual command also has a 30-minute cap; the earliest parent, operation,
+or command deadline wins. Configure `quality.codeql.timeout` explicitly when
+a justified workload needs another overall budget. Timeout diagnostics report
+the phase and budgets; incomplete analysis never counts as passed.
+
+By default, Ouro creates fresh CodeQL databases. To opt into incremental
+overlay analysis, add `incremental: true` under `quality.codeql` in
+.ouro/config.yaml:
+
+```yaml
+quality:
+  codeql:
+    incremental: true
+```
+
+The first eligible scan creates a reusable base under
+.ouro/quality/codeql/overlay-cache. Later scans copy that immutable base and
+extract added, modified, and deleted source files. Every run still produces
+its own SARIF report, including findings in unchanged code; this is not
+diff-only alert filtering. Only completed analyses publish bases (including
+analyses with blocking findings). Failed scans never replace a valid base.
+Overlay results are not promoted to bases.
+
+This initial implementation supports Go and JavaScript/TypeScript with
+CodeQL >= 2.24.2 and Git >= 2.38. Run at the Git repository root with the index
+matching the working tree. Ouro never stages files. Unstaged changes,
+untracked/ignored files outside .ouro and .agent-work, submodules, tracked
+symlinks, unsupported languages, and a busy cache fall back to full analysis.
+A clean analysis checkout is recommended, especially for projects with
+ignored dependency/build directories. Changes to dependencies or other
+non-source tracked files rebuild the base. CLI, Go/Node toolchain versions,
+resolved query-packs, languages, source-root, and execution-environment
+changes also invalidate compatibility.
+
+Cache decisions and failures are recorded in analyzer stderr. An incremental
+analysis failure retries ordinary full analysis at most once within the same
+overall timeout; cancellation does not retry. Cache copies reject symlinks
+and are limited to 100,000 files/32 GiB. Interrupted cache writers may leave
+an overlay-cache/lock directory: confirm that no writer is running before
+removing that lock. A busy/interrupted lock never blocks a full scan.
+
+CodeQL's query-compilation caches are separate and can also speed up later
+runs. Do not clear shared caches merely to reproduce a slow run. See the
+[incremental analysis guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/scan-from-the-command-line/incremental-analysis)
+and [CodeQL command reference](https://docs.github.com/en/code-security/reference/code-scanning/codeql/codeql-cli-manual/database-analyze).
+
 ## Run quality
 
 `fast`, `deep`, and `strict` are cumulative profiles. Without `--stage`, Ouro

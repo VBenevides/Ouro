@@ -1,0 +1,40 @@
+name: Quality regression checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  platform-checks:
+    name: Build and readiness tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Deterministic prerequisite and process regressions
+        run: go test ./internal/process ./internal/gates ./internal/quality ./internal/workflow ./internal/cli -run 'Test(CheckSonarReadiness|SonarReadiness|QualityReadiness|Readiness|MissingExecutables|UnavailableExecutable|Prerequisite|StructuredPrerequisite|CommandProgress|ProgressTiming|OSRunner)'
+      - name: Full Go suite with race detection (Linux)
+        if: runner.os == 'Linux'
+        run: go test -race ./...
+      - name: Go static analysis
+        run: go vet ./...
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: JavaScript tests
+        working-directory: pi-ouro
+        run: npm test

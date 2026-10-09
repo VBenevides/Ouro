@@ -1,6 +1,7 @@
 package languages
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/VBenevides/Ouro/internal/config"
 	"github.com/VBenevides/Ouro/internal/gates"
+	ouroGit "github.com/VBenevides/Ouro/internal/git"
 )
 
 const (
@@ -91,30 +93,19 @@ func languageFiles(root string) ([]fileRecord, error) {
 		}
 		return nil, fmt.Errorf("language root: %w", err)
 	}
-	files := make([]fileRecord, 0)
-	err = filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
+	paths, err := ouroGit.QualityFiles(context.Background(), root)
+	if err != nil {
+		return nil, err
+	}
+	files := make([]fileRecord, 0, len(paths))
+	for _, relative := range paths {
+		if excluded(relative) {
+			continue
 		}
-		if path == root {
-			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		if excluded(rel) {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !entry.IsDir() {
-			files = append(files, fileRecord{Root: filepath.Dir(path), Name: entry.Name(), Path: filepath.ToSlash(rel)})
-		}
-		return nil
-	})
-	return files, err
+		path := filepath.Join(root, filepath.FromSlash(relative))
+		files = append(files, fileRecord{Root: filepath.Dir(path), Name: filepath.Base(path), Path: relative})
+	}
+	return files, nil
 }
 
 func manifestLanguages(name string) []string {

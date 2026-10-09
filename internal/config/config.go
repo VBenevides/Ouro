@@ -52,15 +52,16 @@ type WorkflowConfig struct {
 }
 
 type QualityConfig struct {
-	SchemaVersion int               `yaml:"schema_version,omitempty"`
-	PolicyMode    QualityPolicyMode `yaml:"policy_mode,omitempty"`
-	Profile       string            `yaml:"profile"`
-	Timeouts      QualityTimeouts   `yaml:"timeouts"`
-	Fast          GateList          `yaml:"fast"`
-	Deep          GateList          `yaml:"deep"`
-	Strict        GateList          `yaml:"strict"`
-	CodeQL        CodeQLConfig      `yaml:"codeql"`
-	Sonar         SonarConfig       `yaml:"sonar"`
+	SchemaVersion       int               `yaml:"schema_version,omitempty"`
+	PolicyMode          QualityPolicyMode `yaml:"policy_mode,omitempty"`
+	Profile             string            `yaml:"profile"`
+	KeepArtifactsWindow int               `yaml:"keep_artifacts_window"`
+	Timeouts            QualityTimeouts   `yaml:"timeouts"`
+	Fast                GateList          `yaml:"fast"`
+	Deep                GateList          `yaml:"deep"`
+	Strict              GateList          `yaml:"strict"`
+	CodeQL              CodeQLConfig      `yaml:"codeql"`
+	Sonar               SonarConfig       `yaml:"sonar"`
 }
 
 type QualityTimeouts struct {
@@ -122,12 +123,14 @@ type CodeQLConfig struct {
 	Executable   string   `yaml:"executable,omitempty"`
 	Enabled      bool     `yaml:"enabled"`
 	Required     bool     `yaml:"required"`
+	Incremental  bool     `yaml:"incremental,omitempty"`
 	Language     string   `yaml:"language"`
 	Version      string   `yaml:"version"`
 	SHA256       string   `yaml:"sha256,omitempty"`
 	DatabasePath string   `yaml:"database_path"`
 	SARIFPath    string   `yaml:"sarif_path"`
 	RunOutputDir string   `yaml:"-" json:"-"`
+	SourceRoot   string   `yaml:"-" json:"-"`
 	Blocking     []string `yaml:"blocking"`
 }
 
@@ -193,7 +196,7 @@ func Default(root string) Config {
 			RequireHumanValidation: true,
 			FailClosed:             true,
 		},
-		Quality:  QualityConfig{SchemaVersion: QualitySchemaVersion, PolicyMode: PolicyNewDefaults},
+		Quality:  QualityConfig{SchemaVersion: QualitySchemaVersion, PolicyMode: PolicyNewDefaults, KeepArtifactsWindow: 5},
 		Tools:    ToolsConfig{ManagedCache: "~/.cache/ouro/tools"},
 		Git:      GitConfig{RequireRepository: true, CaptureDiff: true},
 		Receipts: ReceiptsConfig{Enabled: true, HashInputs: true, HashOutputs: true},
@@ -309,6 +312,9 @@ func validateQuality(version int, quality QualityConfig) error {
 }
 
 func validateQualityVersion(version int, quality QualityConfig) error {
+	if quality.KeepArtifactsWindow < 0 {
+		return errors.New("quality.keep_artifacts_window must not be negative")
+	}
 	switch version {
 	case 1:
 		if quality.SchemaVersion != 0 || quality.PolicyMode != "" {

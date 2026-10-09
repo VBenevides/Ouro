@@ -20,17 +20,18 @@ import (
 )
 
 type QualityOptions struct {
-	Root          string
-	RunID         string
-	RunIDReserved bool
-	Stage         string
-	Iteration     int
-	Config        config.Config
-	Runner        process.Runner
-	Ephemeral     bool
-	ExactStage    bool
-	AutoFormat    bool
-	Progress      io.Writer
+	Root           string
+	RunID          string
+	RunIDReserved  bool
+	Stage          string
+	Iteration      int
+	Config         config.Config
+	Runner         process.Runner
+	Ephemeral      bool
+	ExactStage     bool
+	AutoFormat     bool
+	Progress       io.Writer
+	CheckReadiness bool
 }
 
 type QualityResult struct {
@@ -61,6 +62,9 @@ type qualityExecution struct {
 	snapshotAfter  string
 	plan           quality.Plan
 	startedAt      time.Time
+	unavailable    map[string]string
+	prerequisites  []quality.PrerequisiteResult
+	mirror         *ouroGit.QualityMirror
 }
 
 func RunQuality(ctx context.Context, options QualityOptions) (qualityResult QualityResult, runErr error) {
@@ -125,6 +129,12 @@ func RunQuality(ctx context.Context, options QualityOptions) (qualityResult Qual
 		}
 	} else if err := quality.ReserveRunID(options.Root, options.RunID); err != nil {
 		return QualityResult{}, fmt.Errorf("reserve quality run ID: %w", err)
+	}
+	if err := quality.WriteRunStart(options.Root, options.RunID, startedAt, plan); err != nil {
+		return QualityResult{}, fmt.Errorf("persist quality start evidence: %w", err)
+	}
+	if err := quality.PruneRunArtifacts(options.Root, options.RunID, options.Config.Quality.KeepArtifactsWindow); err != nil {
+		return QualityResult{}, fmt.Errorf("prune expired quality artifacts: %w", err)
 	}
 	if err := ctx.Err(); err != nil {
 		execution := qualityExecution{plan: plan, startedAt: startedAt, results: []gates.Result{}, findings: []findings.Finding{}}
@@ -356,7 +366,21 @@ func executeQualityStages(ctx context.Context, options QualityOptions, stages []
 		return execution, fmt.Errorf("snapshot quality inputs before gates: %w", err)
 	}
 	execution.snapshotBefore = "sha256:" + before.Hash
+	mirror, err := ouroGit.NewQualityMirror(ctx, options.Root)
+	if err != nil {
+		return execution, fmt.Errorf("prepare non-ignored quality inputs: %w", err)
+	}
+	execution.mirror = mirror
+	defer func() {
+		if closeErr := mirror.Close(); closeErr != nil {
+			execution.results = append(execution.results, qualityErrorResult("quality-input-mirror", "fast", "system", true, closeErr))
+		}
+	}()
 	runner := process.ProgressRunner{Runner: options.Runner, Writer: options.Progress}
+	if options.CheckReadiness {
+		execution.results, execution.unavailable = checkQualityReadiness(ctx, options, stages, plan)
+		execution.prerequisites = qualityPrerequisites(plan, execution.unavailable)
+	}
 	executeFormattingStages(ctx, options, stages, runner, plan, &execution)
 	var executionErr error
 	for _, stage := range stages {
@@ -380,12 +404,18 @@ func executeFormattingStages(ctx context.Context, options QualityOptions, stages
 	for index := range stages {
 		formatting, checks := splitFormattingGates(stages[index].selected, options.AutoFormat)
 		stages[index].selected = checks
-		execution.results = append(execution.results, gates.Executor{Runner: runner, Progress: options.Progress}.Run(ctx, options.Root, formatting, false, qualityDeclaredOutputs(plan)...)...)
+		execution.results = append(execution.results, gates.Executor{Runner: runner, Progress: options.Progress, WorkRoot: execution.mirror.Root}.Run(ctx, options.Root, formatting, false, qualityDeclaredOutputs(plan)...)...)
+		if err := execution.mirror.Sync(ctx); err != nil {
+			execution.results = append(execution.results, qualityErrorResult("quality-input-sync", "fast", "system", true, err))
+		}
 	}
 }
 
 func executeQualityStage(ctx context.Context, options QualityOptions, stage qualityStageGates, coveragePath string, runner process.ProgressRunner, plan quality.Plan, execution *qualityExecution) ([]gates.Result, error) {
-	stageResults := gates.Executor{Runner: runner, Progress: options.Progress}.Run(ctx, options.Root, stage.selected, stage.generic.Parallel, qualityDeclaredOutputs(plan)...)
+	stageResults := gates.Executor{Runner: runner, Progress: options.Progress, WorkRoot: execution.mirror.Root}.Run(ctx, options.Root, stage.selected, stage.generic.Parallel, qualityDeclaredOutputs(plan)...)
+	if err := execution.mirror.Sync(ctx); err != nil {
+		stageResults = append(stageResults, qualityErrorResult("quality-input-sync", stage.level, "system", true, err))
+	}
 	if hasSuccessfulCoverage(stageResults, coveragePath) {
 		execution.coverageReady = true
 	}
@@ -440,6 +470,11 @@ func runDeepQuality(ctx context.Context, options QualityOptions, runner process.
 
 func runCodeQLQuality(ctx context.Context, options QualityOptions, runner process.Runner, execution *qualityExecution) error {
 	codeQLConfig := options.Config.Quality.CodeQL
+	if reason := execution.unavailable[readinessKey("codeql", ".", "deep")]; reason != "" {
+		execution.results = append(execution.results, unavailableQualityResult(gates.Gate{Name: "codeql", Level: "deep", Category: "security", Required: codeQLConfig.Required, ComponentRoot: ".", Tool: "codeql"}, reason))
+		return nil
+	}
+	codeQLConfig.SourceRoot = execution.mirror.Root
 	codeQLConfig.RunOutputDir = filepath.Join(".ouro", "runs", options.RunID, "analyzers", "codeql")
 	outcome, runErr := gates.RunCodeQL(ctx, options.Root, codeQLConfig, runner, qualityDeclaredOutputs(execution.plan)...)
 	if runErr != nil {
@@ -456,6 +491,10 @@ func runCodeQLQuality(ctx context.Context, options QualityOptions, runner proces
 
 func runSonarQuality(ctx context.Context, options QualityOptions, runner process.Runner, coveragePath string, execution *qualityExecution) error {
 	sonarConfig := options.Config.Quality.Sonar
+	if reason := execution.unavailable[readinessKey("sonar", ".", "deep")]; reason != "" {
+		execution.results = append(execution.results, unavailableQualityResult(gates.Gate{Name: "sonar", Level: "deep", Category: "quality", Required: sonarConfig.Required, ComponentRoot: ".", Tool: "sonar"}, reason))
+		return nil
+	}
 	if execution.coverageReady {
 		sonarConfig.GoCoveragePath = coveragePath
 	} else {

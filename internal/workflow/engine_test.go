@@ -29,6 +29,9 @@ func setupGitRepo(t *testing.T) (string, State, string) {
 	t.Helper()
 	root := t.TempDir()
 	runGit(t, root, "init", "-q")
+	// Engine commits must not depend on the developer's global Git identity.
+	runGit(t, root, "config", "user.name", "Ouro Test")
+	runGit(t, root, "config", "user.email", "ouro@example.test")
 	if err := os.WriteFile(filepath.Join(root, "source.txt"), []byte("before\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

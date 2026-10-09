@@ -1,6 +1,7 @@
 ---
 name: ouro-quality
 description: Run and remediate the Ouro quality gate in the current Pi or oh-my-pi session.
+disable-model-invocation: true
 ---
 
 # Ouro quality
@@ -49,6 +50,20 @@ edits: report the warnings and state explicitly that the result is not a pass.
 6. Continue authorized remediation until `PASS`; if a concrete blocker remains,
    report the exact failing gate, attempted repair, and missing prerequisite.
    Never describe a blocked or warning-bearing result as a pass.
+
+## Gitignored files
+
+Gitignored files and directories (for example `.venv/`, `node_modules/`, or
+local reference projects) are outside the quality gates. They MUST NOT be
+discovered as components, formatted, checked, tested, scanned, or audited, and
+this includes everything inside an ignored directory.
+
+Ouro builds its component list and runs gates from the files Git does not
+ignore. Before running Ouro, confirm that any custom gate, command, or Sonar
+properties file the project configures also excludes ignored paths. If the
+configured gates cannot enforce this boundary, report the blocker instead of
+running them. Never remove ignore rules, force-include ignored files, or
+direct a tool at an ignored path to obtain a pass.
 
 ## Verification boundary
 

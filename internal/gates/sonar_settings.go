@@ -56,7 +56,7 @@ func loadSonarSettings(root string) (sonarSettings, error) {
 			return sonarSettings{}, fmt.Errorf("inspect Sonar settings: %w", err)
 		}
 		if !info.Mode().IsRegular() {
-			return sonarSettings{}, errors.New("Sonar settings must be a regular file")
+			return sonarSettings{}, errors.New("sonar settings must be a regular file")
 		}
 		file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if err != nil {
@@ -64,12 +64,10 @@ func loadSonarSettings(root string) (sonarSettings, error) {
 		}
 		openedInfo, statErr := file.Stat()
 		if statErr != nil || !openedInfo.Mode().IsRegular() || !os.SameFile(info, openedInfo) {
-			file.Close()
-			return sonarSettings{}, errors.New("Sonar settings changed while opening")
+			return sonarSettings{}, errors.Join(errors.New("sonar settings changed while opening"), statErr, file.Close())
 		}
 		if err := verifySonarPath(root, path); err != nil {
-			file.Close()
-			return sonarSettings{}, err
+			return sonarSettings{}, errors.Join(err, file.Close())
 		}
 		data, readErr := io.ReadAll(io.LimitReader(file, sonarMetadataFileBytes+1))
 		closeErr := file.Close()
@@ -77,7 +75,7 @@ func loadSonarSettings(root string) (sonarSettings, error) {
 			return sonarSettings{}, fmt.Errorf("read Sonar settings: %w", err)
 		}
 		if len(data) > sonarMetadataFileBytes {
-			return sonarSettings{}, errors.New("Sonar settings exceed size limit")
+			return sonarSettings{}, errors.New("sonar settings exceed size limit")
 		}
 		properties, err := parseSonarProperties(data)
 		if err != nil {
@@ -85,7 +83,7 @@ func loadSonarSettings(root string) (sonarSettings, error) {
 		}
 		for _, key := range []string{"sonar.token", "sonar.login", "sonar.password", "sonar.projectBaseDir", "sonar.branch.name", "sonar.pullrequest.key", "sonar.pullrequest.branch", "sonar.pullrequest.base", "sonar.scanner.dumpToFile", "sonar.scanner.internal.dumpToFile", "sonar.scanner.metadataFilePath"} {
 			if _, exists := properties[key]; exists {
-				return sonarSettings{}, fmt.Errorf("Sonar settings option %s is owned by Ouro and must not be set in the file", key)
+				return sonarSettings{}, fmt.Errorf("sonar settings option %s is owned by Ouro and must not be set in the file", key)
 			}
 		}
 		return sonarSettings{path: path, properties: properties, digest: fmt.Sprintf("%x", sha256.Sum256(data))}, nil

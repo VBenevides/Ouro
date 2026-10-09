@@ -491,8 +491,8 @@ func missingReadiness(base string) readinessResult {
 	return readinessResult{
 		state:  Missing,
 		tool:   ToolIdentity{Name: filepath.Base(base)},
-		reason: fmt.Sprintf("Executable %s was not found on PATH or at its configured path.", filepath.Base(base)),
-		action: &Action{Code: "install-executable", Message: fmt.Sprintf("Install %s or update the configured command.", filepath.Base(base))},
+		reason: fmt.Sprintf("Executable %s was not found on PATH or at its configured path. Install %s, make it available on PATH or at the configured path, then run Ouro quality again.", filepath.Base(base), filepath.Base(base)),
+		action: &Action{Code: "install-executable", Message: fmt.Sprintf("Install %s, make it available on PATH or at the configured path, then run Ouro quality again.", filepath.Base(base))},
 	}
 }
 

@@ -395,7 +395,22 @@ func SnapshotQualityInputs(root string, declaredOutputs ...string) (Snapshot, er
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return snapshotTree(absoluteRoot, qualityInputExcluder(absoluteRoot, excludedOutputs))
+	files, err := QualityFiles(context.Background(), absoluteRoot)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	// Configuration is control-plane evidence, not an analyzer source target.
+	files = append(files, ".ouro/config.yaml")
+	selected := make(map[string]bool)
+	for _, file := range files {
+		for path := filepath.FromSlash(file); path != "."; path = filepath.Dir(path) {
+			selected[filepath.ToSlash(path)] = true
+		}
+	}
+	exclude := qualityInputExcluder(absoluteRoot, excludedOutputs)
+	return snapshotTree(absoluteRoot, func(path string) bool {
+		return !selected[path] || exclude(path)
+	})
 }
 
 func normalizeQualityOutputs(declaredOutputs []string) ([]string, error) {

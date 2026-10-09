@@ -62,7 +62,7 @@ type sarifRun struct {
 	} `json:"results"`
 }
 
-func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner process.Runner, declaredOutputs ...string) (CodeQLOutcome, error) {
+func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner process.Runner, declaredOutputs ...string) (outcome CodeQLOutcome, runErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -72,6 +72,7 @@ func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner
 	}
 	operationContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	defer func() { outcome = explainCodeQLTimeout(outcome, operationContext, timeout) }()
 	if runner == nil {
 		runner = process.OSRunner{}
 	}
@@ -100,7 +101,41 @@ func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner
 		base.Status, base.Detail, base.ExitCode = Error, codeQLSetupFail+err.Error(), -1
 		return finishCodeQL(CodeQLOutcome{Result: base, Stage: "setup", Version: version}), err
 	}
+	if cfg.Incremental {
+		canonicalRoot, resolveErr := resolveCodeQLProjectRoot(root)
+		if resolveErr != nil {
+			overlayDiagnostic(&base, "resolve overlay root: "+resolveErr.Error()+"; using full analysis")
+		} else {
+			overlay, release, overlayErr := prepareCodeQLOverlay(operationContext, canonicalRoot, executable, runner, paths, &base)
+			if overlayErr != nil {
+				overlayDiagnostic(&base, overlayErr.Error())
+			} else {
+				paths.overlay = overlay
+				defer func() {
+					release()
+					outcome.Result.Stderr = base.Stderr
+				}()
+			}
+		}
+	}
 	status, detail, parsedFindings, stage := analyzeCodeQL(operationContext, root, cfg, executable, runner, paths, &base)
+	if paths.overlay != nil && status == Error && !base.OutputTruncated && operationContext.Err() == nil {
+		overlayDiagnostic(&base, "incremental analysis failed: "+detail+"; retrying once with ordinary full analysis")
+		if cleanupErr := removeCodeQLDatabase(root, paths.database); cleanupErr != nil {
+			status, detail, stage = Error, "clean failed overlay: "+cleanupErr.Error(), "cleanup"
+		} else {
+			paths.overlay = nil
+			status, detail, parsedFindings, stage = analyzeCodeQL(operationContext, root, cfg, executable, runner, paths, &base)
+		}
+	}
+	if paths.overlay != nil && stage == "complete" {
+		canonicalRoot, resolveErr := resolveCodeQLProjectRoot(root)
+		if resolveErr != nil {
+			overlayDiagnostic(&base, "cache was not published: "+resolveErr.Error())
+		} else if cacheErr := paths.overlay.publish(operationContext, canonicalRoot, executable, runner, paths, &base); cacheErr != nil {
+			overlayDiagnostic(&base, "cache was not published: "+cacheErr.Error())
+		}
+	}
 	if cleanupErr := removeCodeQLDatabase(root, paths.database); cleanupErr != nil {
 		status = Error
 		detail = strings.TrimSpace(detail + "; CodeQL database cleanup failed: " + redact(cleanupErr.Error()))
@@ -177,6 +212,7 @@ type codeQLPaths struct {
 	before    os.FileInfo
 	beforeErr error
 	languages []string
+	overlay   *codeQLOverlay
 }
 
 func prepareCodeQLPaths(root string, cfg config.CodeQLConfig) (codeQLPaths, error) {
@@ -250,11 +286,22 @@ func removeCodeQLDatabase(root, database string) error {
 }
 
 func analyzeCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, executable string, runner process.Runner, paths codeQLPaths, base *Result) (Status, string, []findings.Finding, string) {
+	sourceRoot := root
+	if cfg.SourceRoot != "" {
+		sourceRoot = cfg.SourceRoot
+	}
 	createArgs := []string{"database", "create", paths.database}
 	if len(paths.languages) > 1 {
 		createArgs = append(createArgs, "--db-cluster")
 	}
-	createArgs = append(createArgs, "--language", strings.Join(paths.languages, ","), "--source-root", root, "--overwrite")
+	createArgs = append(createArgs, "--language", strings.Join(paths.languages, ","), "--source-root", sourceRoot)
+	if paths.overlay == nil {
+		createArgs = append(createArgs, "--overwrite")
+	} else if paths.overlay.restored {
+		createArgs = append(createArgs, "--overlay-changes="+paths.overlay.changes, "--cache-cleanup=overlay")
+	} else {
+		createArgs = append(createArgs, "--overwrite", "--overlay-base", "--cache-cleanup=overlay")
+	}
 	create := runner.Run(ctx, process.Command{Executable: executable, Args: createArgs, Label: "codeql database create", Dir: root, Environment: gateEnvironment(nil), ClearEnv: true, Timeout: codeQLCommandTimeout})
 	recordCodeQLOutput(base, "database create", create)
 	base.ExitCode = create.ExitCode
@@ -313,11 +360,12 @@ func codeQLIntermediateDir(paths codeQLPaths) (string, error) {
 }
 
 type codeQLLanguageAnalysis struct {
-	ctx        context.Context
-	root       string
-	executable string
-	runner     process.Runner
-	base       *Result
+	ctx         context.Context
+	root        string
+	executable  string
+	runner      process.Runner
+	base        *Result
+	incremental bool
 }
 
 func analyzeCodeQLLanguages(ctx context.Context, root, executable string, runner process.Runner, paths codeQLPaths, intermediateDir string, base *Result) ([][]byte, Status, string, string) {
@@ -329,7 +377,7 @@ func analyzeCodeQLLanguages(ctx context.Context, root, executable string, runner
 			analysisDatabase = filepath.Join(paths.database, language)
 			analysisOutput = filepath.Join(intermediateDir, fmt.Sprintf("results-%d.sarif", index))
 		}
-		data, status, detail, stage := (codeQLLanguageAnalysis{ctx: ctx, root: root, executable: executable, runner: runner, base: base}).run(language, analysisDatabase, analysisOutput)
+		data, status, detail, stage := (codeQLLanguageAnalysis{ctx: ctx, root: root, executable: executable, runner: runner, base: base, incremental: paths.overlay != nil}).run(language, analysisDatabase, analysisOutput)
 		if status != "" {
 			return nil, status, detail, stage
 		}
@@ -343,7 +391,11 @@ func analyzeCodeQLLanguages(ctx context.Context, root, executable string, runner
 }
 
 func (analysis codeQLLanguageAnalysis) run(language, database, output string) ([]byte, Status, string, string) {
-	analyze := analysis.runner.Run(analysis.ctx, process.Command{Executable: analysis.executable, Args: []string{"database", "analyze", database, "--format=sarif-latest", "--output", output}, Label: "codeql database analyze " + language, Dir: analysis.root, Environment: gateEnvironment(nil), ClearEnv: true, Timeout: codeQLCommandTimeout})
+	args := []string{"database", "analyze", database, "--format=sarif-latest", "--output", output}
+	if analysis.incremental {
+		args = append(args, "--keep-full-cache")
+	}
+	analyze := analysis.runner.Run(analysis.ctx, process.Command{Executable: analysis.executable, Args: args, Label: "codeql database analyze " + language, Dir: analysis.root, Environment: gateEnvironment(nil), ClearEnv: true, Timeout: codeQLCommandTimeout})
 	recordCodeQLOutput(analysis.base, "database analyze "+language, analyze)
 	analysis.base.ExitCode = analyze.ExitCode
 	if analysis.base.OutputTruncated {
