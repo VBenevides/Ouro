@@ -643,6 +643,12 @@ func TestRunSonarReportsFailedQualityGateAfterScannerSubmission(t *testing.T) {
 		if request.URL.Path == "/api/qualitygates/project_status" {
 			return sonarResponse(`{"projectStatus":{"status":"ERROR","conditions":[{"metricKey":"new_coverage","status":"ERROR","comparator":"LT","periodIndex":1,"errorThreshold":"80","actualValue":"70","onLeakPeriod":true}]}}`), nil
 		}
+		if request.URL.Path == "/api/measures/component_tree" {
+			return sonarResponse(`{"paging":{"total":1},"components":[{"key":"ouro:internal/foo.go","path":"internal/foo.go","measures":[{"metric":"new_uncovered_lines","period":{"value":"1"}}]}]}`), nil
+		}
+		if request.URL.Path == "/api/sources/lines" {
+			return sonarResponse(`{"sources":[{"line":42,"isNew":true,"lineHits":0}]}`), nil
+		}
 		return baseClient(request)
 	})
 	outcome, err := RunSonar(context.Background(), t.TempDir(), config.SonarConfig{Enabled: true, Required: true, Mode: "remote", URL: "https://sonar.example", ProjectKey: "ouro", TokenEnv: "SONAR_TOKEN"}, runner, client)
@@ -654,6 +660,9 @@ func TestRunSonarReportsFailedQualityGateAfterScannerSubmission(t *testing.T) {
 	}
 	if outcome.Report.QualityGate.Status != "ERROR" || len(outcome.Report.QualityGate.Conditions) != 1 {
 		t.Fatalf("failed Sonar quality gate was not preserved in report: %+v", outcome.Report)
+	}
+	if outcome.Report.NewCodeCoverage == nil || !outcome.Report.NewCodeCoverage.Complete || !strings.Contains(SonarReportMarkdown(outcome.Report), "internal/foo.go:42") {
+		t.Fatalf("failed coverage gate did not export actionable diagnostics: %+v", outcome.Report)
 	}
 }
 

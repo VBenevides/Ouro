@@ -353,7 +353,7 @@ func (e *sonarExecution) runAnalysis(taskID, token string) SonarOutcome {
 	e.report.QualityGate.IgnoredConditions = ignoredConditions
 	e.result.Status = Pass
 	e.result.Detail = "Sonar quality gate: " + quality
-	if e.collectMetrics(baseURL, token) || e.collectIssuesAndHotspots(baseURL, token) {
+	if e.collectMetrics(baseURL, token) || e.collectIssuesAndHotspots(baseURL, token) || e.collectNewCodeCoverage(baseURL, token) {
 		return e.finish(SonarOutcome{Result: e.result, TaskID: taskID, AnalysisID: analysisID})
 	}
 	if quality != "OK" && quality != "PASSED" {

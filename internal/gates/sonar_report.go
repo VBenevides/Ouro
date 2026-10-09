@@ -19,24 +19,25 @@ const (
 )
 
 type SonarReport struct {
-	SchemaVersion  int                    `json:"schema_version"`
-	ReportID       string                 `json:"report_id"`
-	GeneratedAt    time.Time              `json:"generated_at"`
-	ProjectKey     string                 `json:"project_key"`
-	ProjectName    string                 `json:"project_name"`
-	Organization   string                 `json:"organization,omitempty"`
-	URL            string                 `json:"url"`
-	Branch         string                 `json:"branch"`
-	AnalysisBranch string                 `json:"analysis_branch"`
-	TaskID         string                 `json:"task_id"`
-	AnalysisID     string                 `json:"analysis_id"`
-	Result         string                 `json:"result"`
-	Detail         string                 `json:"detail"`
-	QualityGate    SonarQualityGateReport `json:"quality_gate"`
-	OverallCode    *SonarOverallMetrics   `json:"overall_code"`
-	Issues         []SonarIssue           `json:"issues"`
-	Hotspots       []SonarHotspot         `json:"hotspots"`
-	Warnings       []string               `json:"warnings"`
+	SchemaVersion   int                    `json:"schema_version"`
+	ReportID        string                 `json:"report_id"`
+	GeneratedAt     time.Time              `json:"generated_at"`
+	ProjectKey      string                 `json:"project_key"`
+	ProjectName     string                 `json:"project_name"`
+	Organization    string                 `json:"organization,omitempty"`
+	URL             string                 `json:"url"`
+	Branch          string                 `json:"branch"`
+	AnalysisBranch  string                 `json:"analysis_branch"`
+	TaskID          string                 `json:"task_id"`
+	AnalysisID      string                 `json:"analysis_id"`
+	Result          string                 `json:"result"`
+	Detail          string                 `json:"detail"`
+	QualityGate     SonarQualityGateReport `json:"quality_gate"`
+	OverallCode     *SonarOverallMetrics   `json:"overall_code"`
+	Issues          []SonarIssue           `json:"issues"`
+	Hotspots        []SonarHotspot         `json:"hotspots"`
+	NewCodeCoverage *SonarNewCodeCoverage  `json:"new_code_coverage,omitempty"`
+	Warnings        []string               `json:"warnings"`
 }
 
 type SonarIssue struct {
@@ -278,6 +279,7 @@ func SonarReportMarkdown(report SonarReport) string {
 	sonarReportFindings(&out, report)
 	sonarReportIssues(&out, report)
 	sonarReportHotspots(&out, report)
+	sonarReportNewCodeCoverage(&out, report.NewCodeCoverage)
 	sonarReportOverallCode(&out, report.OverallCode)
 	sonarReportWarnings(&out, report.Warnings)
 	out.WriteString("## Instructions for the Coding Agent\n\n1. Read each finding and inspect the referenced source before changing it.\n2. Classify each finding as valid, false positive, accepted risk, or already fixed.\n3. Fix valid Security and Reliability findings before Maintainability findings.\n4. Add or update tests for valid bugs and security findings when practical.\n5. Run the relevant formatter, type checker, and tests after each related group of fixes.\n6. Record unresolved findings and the reason they remain.\n")
