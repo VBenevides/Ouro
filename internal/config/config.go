@@ -122,6 +122,7 @@ type CodeQLConfig struct {
 	Executable   string   `yaml:"executable,omitempty"`
 	Enabled      bool     `yaml:"enabled"`
 	Required     bool     `yaml:"required"`
+	Incremental  bool     `yaml:"incremental,omitempty"`
 	Language     string   `yaml:"language"`
 	Version      string   `yaml:"version"`
 	SHA256       string   `yaml:"sha256,omitempty"`

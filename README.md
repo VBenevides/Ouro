@@ -62,11 +62,46 @@ or command deadline wins. Configure `quality.codeql.timeout` explicitly when
 a justified workload needs another overall budget. Timeout diagnostics report
 the phase and budgets; incomplete analysis never counts as passed.
 
-Ouro creates fresh CodeQL databases for source correctness. CodeQL's default
-query-compilation caches are separate from those databases and may speed up
-later runs. Cold compilation or upgraded query packs can take longer; inspect
-cache readiness before considering database reuse. Do not clear shared caches
-merely to reproduce a slow run. See the [CodeQL command reference](https://docs.github.com/en/code-security/reference/code-scanning/codeql/codeql-cli-manual/database-analyze) for compilation-cache options.
+By default, Ouro creates fresh CodeQL databases. To opt into incremental
+overlay analysis, add `incremental: true` under `quality.codeql` in
+.ouro/config.yaml:
+
+```yaml
+quality:
+  codeql:
+    incremental: true
+```
+
+The first eligible scan creates a reusable base under
+.ouro/quality/codeql/overlay-cache. Later scans copy that immutable base and
+extract added, modified, and deleted source files. Every run still produces
+its own SARIF report, including findings in unchanged code; this is not
+diff-only alert filtering. Only completed analyses publish bases (including
+analyses with blocking findings). Failed scans never replace a valid base.
+Overlay results are not promoted to bases.
+
+This initial implementation supports Go and JavaScript/TypeScript with
+CodeQL >= 2.24.2 and Git >= 2.38. Run at the Git repository root with the index
+matching the working tree. Ouro never stages files. Unstaged changes,
+untracked/ignored files outside .ouro and .agent-work, submodules, tracked
+symlinks, unsupported languages, and a busy cache fall back to full analysis.
+A clean analysis checkout is recommended, especially for projects with
+ignored dependency/build directories. Changes to dependencies or other
+non-source tracked files rebuild the base. CLI, Go/Node toolchain versions,
+resolved query-packs, languages, source-root, and execution-environment
+changes also invalidate compatibility.
+
+Cache decisions and failures are recorded in analyzer stderr. An incremental
+analysis failure retries ordinary full analysis at most once within the same
+overall timeout; cancellation does not retry. Cache copies reject symlinks
+and are limited to 100,000 files/32 GiB. Interrupted cache writers may leave
+an overlay-cache/lock directory: confirm that no writer is running before
+removing that lock. A busy/interrupted lock never blocks a full scan.
+
+CodeQL's query-compilation caches are separate and can also speed up later
+runs. Do not clear shared caches merely to reproduce a slow run. See the
+[incremental analysis guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/scan-from-the-command-line/incremental-analysis)
+and [CodeQL command reference](https://docs.github.com/en/code-security/reference/code-scanning/codeql/codeql-cli-manual/database-analyze).
 
 ## Run quality
 
