@@ -129,6 +129,9 @@ func RunQuality(ctx context.Context, options QualityOptions) (qualityResult Qual
 	} else if err := quality.ReserveRunID(options.Root, options.RunID); err != nil {
 		return QualityResult{}, fmt.Errorf("reserve quality run ID: %w", err)
 	}
+	if err := quality.WriteRunStart(options.Root, options.RunID, startedAt, plan); err != nil {
+		return QualityResult{}, fmt.Errorf("persist quality start evidence: %w", err)
+	}
 	if err := ctx.Err(); err != nil {
 		execution := qualityExecution{plan: plan, startedAt: startedAt, results: []gates.Result{}, findings: []findings.Finding{}}
 		results = execution.results

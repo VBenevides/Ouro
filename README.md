@@ -46,6 +46,15 @@ required unavailable checks still block a pass. JSON execution writes readiness
 messages to stderr and preserves structured results on stdout. These readiness
 checks do not provision services or prove project permissions or a quality pass.
 
+Quality execution handles Ctrl+C and SIGTERM by cancelling active commands and
+persisting an incomplete/cancelled result. On Unix, cancellation terminates the
+command process group. Before gates start, each run records immutable
+`started.json` evidence; this is never a result or a completion claim. A run
+without a valid completed result must be treated as incomplete, not passed.
+SIGKILL, host failure, or power loss cannot be handled by the parent: descendants
+may remain alive and need operator cleanup. On non-Unix platforms, cancellation
+currently stops the direct child only; descendant cleanup is not guaranteed.
+
 ## Run quality
 
 `fast`, `deep`, and `strict` are cumulative profiles. Without `--stage`, Ouro
