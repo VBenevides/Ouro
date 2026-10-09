@@ -62,7 +62,7 @@ type sarifRun struct {
 	} `json:"results"`
 }
 
-func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner process.Runner, declaredOutputs ...string) (CodeQLOutcome, error) {
+func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner process.Runner, declaredOutputs ...string) (outcome CodeQLOutcome, runErr error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -72,6 +72,7 @@ func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner
 	}
 	operationContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	defer func() { outcome = explainCodeQLTimeout(outcome, operationContext, timeout) }()
 	if runner == nil {
 		runner = process.OSRunner{}
 	}

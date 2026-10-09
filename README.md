@@ -55,6 +55,19 @@ SIGKILL, host failure, or power loss cannot be handled by the parent: descendant
 may remain alive and need operator cleanup. On non-Unix platforms, cancellation
 currently stops the direct child only; descendant cleanup is not guaranteed.
 
+CodeQL defaults to a 15-minute overall operation budget, including version
+checks, database creation, and analysis of every selected language. Each
+individual command also has a 30-minute cap; the earliest parent, operation,
+or command deadline wins. Configure `quality.codeql.timeout` explicitly when
+a justified workload needs another overall budget. Timeout diagnostics report
+the phase and budgets; incomplete analysis never counts as passed.
+
+Ouro creates fresh CodeQL databases for source correctness. CodeQL's default
+query-compilation caches are separate from those databases and may speed up
+later runs. Cold compilation or upgraded query packs can take longer; inspect
+cache readiness before considering database reuse. Do not clear shared caches
+merely to reproduce a slow run. See the [CodeQL command reference](https://docs.github.com/en/code-security/reference/code-scanning/codeql/codeql-cli-manual/database-analyze) for compilation-cache options.
+
 ## Run quality
 
 `fast`, `deep`, and `strict` are cumulative profiles. Without `--stage`, Ouro
