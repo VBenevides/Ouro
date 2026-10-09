@@ -16,7 +16,7 @@ func TestStructuredPrerequisiteClassifications(t *testing.T) {
 	} {
 		t.Run(test.code, func(t *testing.T) {
 			plan := quality.Plan{Gates: []quality.GatePlan{{ID: "gate-id", Name: "sonar", ComponentRoot: ".", Applicability: quality.Applicable, Readiness: quality.Ready}}}
-			results := qualityPrerequisites(plan, map[string]string{readinessKey("sonar", "."): test.reason})
+			results := qualityPrerequisites(plan, map[string]string{readinessKey("sonar", ".", ""): test.reason})
 			if len(results) != 1 || results[0].Code != test.code || results[0].Message != test.reason || results[0].Readiness != quality.Missing || len(results[0].NextSteps) != 1 {
 				t.Fatalf("unexpected prerequisite result: %+v", results)
 			}
@@ -30,7 +30,7 @@ func TestStructuredPrerequisitesIncludeSuccessfulAndMissingTools(t *testing.T) {
 		{ID: "missing", Name: "lint", Applicability: quality.Applicable, Readiness: quality.Missing, NextSteps: []quality.Action{{Code: "install-executable", Message: "Install lint and run again."}}},
 		{ID: "omitted", Name: "test", Applicability: quality.NotApplicable},
 	}}
-	results := qualityPrerequisites(plan, map[string]string{readinessKey("lint", ""): "executable not found"})
+	results := qualityPrerequisites(plan, map[string]string{readinessKey("lint", "", ""): "executable not found"})
 	if results[0].Code != "ready" || results[1].Code != "executable-unavailable" || results[2].Code != "not-applicable" {
 		t.Fatalf("unexpected prerequisite codes: %+v", results)
 	}

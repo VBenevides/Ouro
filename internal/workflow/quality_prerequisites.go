@@ -12,7 +12,7 @@ func qualityPrerequisites(plan quality.Plan, unavailable map[string]string) []qu
 		result := quality.PrerequisiteResult{GateID: gate.ID, Readiness: gate.Readiness, Code: "ready", Message: gate.Reason, NextSteps: []quality.Action{}}
 		if gate.Applicability != quality.Applicable {
 			result.Code = "not-applicable"
-		} else if reason := unavailable[readinessKey(gate.Name, gate.ComponentRoot)]; reason != "" {
+		} else if reason := unavailable[readinessKey(gate.Name, gate.ComponentRoot, gate.Stage)]; reason != "" {
 			result.Readiness = quality.Missing
 			result.Code, result.NextSteps = prerequisiteRepair(gate, reason)
 			result.Message = reason

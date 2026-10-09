@@ -19,12 +19,12 @@ func checkQualityReadiness(ctx context.Context, options QualityOptions, stages [
 			sonarSelected = true
 		}
 		if gate.Readiness == quality.Missing {
-			unavailable[readinessKey(gate.Name, gate.ComponentRoot)] = gate.Reason
+			unavailable[readinessKey(gate.Name, gate.ComponentRoot, gate.Stage)] = gate.Reason
 		}
 	}
-	if sonarSelected && unavailable[readinessKey("sonar", ".")] == "" {
+	if sonarSelected && unavailable[readinessKey("sonar", ".", "deep")] == "" {
 		if err := gates.CheckSonarReadiness(ctx, options.Root, options.Config.Quality.Sonar, nil); err != nil {
-			unavailable[readinessKey("sonar", ".")] = err.Error()
+			unavailable[readinessKey("sonar", ".", "deep")] = err.Error()
 		}
 	}
 	printQualityReadiness(options, plan, unavailable)
@@ -40,7 +40,7 @@ func printQualityReadiness(options QualityOptions, plan quality.Plan, unavailabl
 		if gate.Applicability != quality.Applicable {
 			continue
 		}
-		if reason := unavailable[readinessKey(gate.Name, gate.ComponentRoot)]; reason != "" {
+		if reason := unavailable[readinessKey(gate.Name, gate.ComponentRoot, gate.Stage)]; reason != "" {
 			_, _ = fmt.Fprintf(options.Progress, "- [unavailable] %s (%s): %s\n", gate.Name, gate.ComponentRoot, reason)
 			continue
 		}
@@ -62,7 +62,7 @@ func filterUnavailableChecks(root string, stages []qualityStageGates, unavailabl
 					componentRoot = filepath.ToSlash(relative)
 				}
 			}
-			if reason := unavailable[readinessKey(gate.Name, componentRoot)]; reason != "" {
+			if reason := unavailable[readinessKey(gate.Name, componentRoot, gate.Level)]; reason != "" {
 				skipped = append(skipped, unavailableQualityResult(gate, reason))
 				continue
 			}
@@ -73,11 +73,11 @@ func filterUnavailableChecks(root string, stages []qualityStageGates, unavailabl
 	return skipped
 }
 
-func readinessKey(name, root string) string {
+func readinessKey(name, root, stage string) string {
 	if root == "" {
 		root = "."
 	}
-	return name + "\x00" + strings.ReplaceAll(root, "\\", "/")
+	return stage + "\x00" + name + "\x00" + strings.ReplaceAll(root, "\\", "/")
 }
 
 func unavailableQualityResult(gate gates.Gate, reason string) gates.Result {

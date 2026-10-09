@@ -18,8 +18,8 @@ func TestQualityReadinessSkipsMissingAndKeepsAvailableNeighbors(t *testing.T) {
 		{Name: "available", Level: "deep", ComponentRoot: "."},
 	}}}
 	plan := quality.Plan{Gates: []quality.GatePlan{
-		{Name: "missing", ComponentRoot: ".", Applicability: quality.Applicable, Readiness: quality.Missing, Reason: "executable not found"},
-		{Name: "available", ComponentRoot: ".", Applicability: quality.Applicable, Readiness: quality.Ready},
+		{Name: "missing", Stage: "deep", ComponentRoot: ".", Applicability: quality.Applicable, Readiness: quality.Missing, Reason: "executable not found"},
+		{Name: "available", Stage: "deep", ComponentRoot: ".", Applicability: quality.Applicable, Readiness: quality.Ready},
 	}}
 	skipped, unavailable := checkQualityReadiness(context.Background(), QualityOptions{Root: root, Progress: &output}, stages, plan)
 	if len(skipped) != 1 || skipped[0].Status != gates.Skipped || !skipped[0].Required || !strings.Contains(skipped[0].Detail, "executable not found") {

@@ -450,7 +450,7 @@ func runDeepQuality(ctx context.Context, options QualityOptions, runner process.
 
 func runCodeQLQuality(ctx context.Context, options QualityOptions, runner process.Runner, execution *qualityExecution) error {
 	codeQLConfig := options.Config.Quality.CodeQL
-	if reason := execution.unavailable[readinessKey("codeql", ".")]; reason != "" {
+	if reason := execution.unavailable[readinessKey("codeql", ".", "deep")]; reason != "" {
 		execution.results = append(execution.results, unavailableQualityResult(gates.Gate{Name: "codeql", Level: "deep", Category: "security", Required: codeQLConfig.Required, ComponentRoot: ".", Tool: "codeql"}, reason))
 		return nil
 	}
@@ -470,7 +470,7 @@ func runCodeQLQuality(ctx context.Context, options QualityOptions, runner proces
 
 func runSonarQuality(ctx context.Context, options QualityOptions, runner process.Runner, coveragePath string, execution *qualityExecution) error {
 	sonarConfig := options.Config.Quality.Sonar
-	if reason := execution.unavailable[readinessKey("sonar", ".")]; reason != "" {
+	if reason := execution.unavailable[readinessKey("sonar", ".", "deep")]; reason != "" {
 		execution.results = append(execution.results, unavailableQualityResult(gates.Gate{Name: "sonar", Level: "deep", Category: "quality", Required: sonarConfig.Required, ComponentRoot: ".", Tool: "sonar"}, reason))
 		return nil
 	}
