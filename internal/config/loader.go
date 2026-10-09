@@ -102,7 +102,7 @@ func Load(path string) (Config, error) {
 	}
 	defer func() { _ = file.Close() }()
 
-	var cfg Config
+	cfg := Config{Quality: QualityConfig{KeepArtifactsWindow: 5}}
 	decoder := yaml.NewDecoder(file)
 	decoder.KnownFields(true)
 	if err := decoder.Decode(&cfg); err != nil {

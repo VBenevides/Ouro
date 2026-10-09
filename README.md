@@ -55,6 +55,16 @@ SIGKILL, host failure, or power loss cannot be handled by the parent: descendant
 may remain alive and need operator cleanup. On non-Unix platforms, cancellation
 currently stops the direct child only; descendant cleanup is not guaranteed.
 
+Configure `quality.keep_artifacts_window` in `.ouro/config.yaml` to control run
+artifact retention. It defaults to `5`: when a new run starts, Ouro keeps that
+run and the four preceding runs intact. Older completed runs retain only regular
+`.json` files in their run root; analyzer databases, coverage files, Markdown
+reports, and other artifacts are deleted. `completion.json` preserves completion
+and baseline history after the original marker is removed. Set the window to `0`
+to disable cleanup. Negative values are invalid. Unfinished runs and newer
+concurrent runs are not pruned. Cleanup failures stop execution with an error;
+already-removed artifacts cannot be recovered by increasing the window.
+
 CodeQL defaults to a 15-minute overall operation budget, including version
 checks, database creation, and analysis of every selected language. Each
 individual command also has a 30-minute cap; the earliest parent, operation,

@@ -472,7 +472,7 @@ func writeImmutableRunFile(root, path string, data []byte, maxBytes int) error {
 func runCompletionState(path string) (bool, error) {
 	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		return retainedRunCompletionState(filepath.Join(filepath.Dir(path), "completion.json"))
 	}
 	if err != nil {
 		return false, err

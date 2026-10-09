@@ -79,6 +79,9 @@ type Result struct {
 type Executor struct {
 	Runner   process.Runner
 	Progress io.Writer
+	// WorkRoot is a filtered copy of root. Gates execute there, while snapshots
+	// and identities still describe root.
+	WorkRoot string
 }
 
 func (e Executor) Run(ctx context.Context, root string, gates []Gate, parallel bool, declaredOutputs ...string) []Result {
@@ -125,14 +128,24 @@ func (e Executor) run(ctx context.Context, root string, gate Gate, declaredOutpu
 	if runner == nil {
 		runner = process.OSRunner{}
 	}
+	workRoot := root
+	if e.WorkRoot != "" {
+		workRoot = e.WorkRoot
+	}
 	dir := gate.Dir
+	if relative, err := filepath.Rel(root, dir); dir != "" && err == nil && isWithinPath(relative) {
+		dir = filepath.Join(workRoot, relative)
+	}
 	if dir == "" {
-		dir = root
+		dir = workRoot
 		if gate.ComponentRoot != "" && gate.ComponentRoot != "." {
 			if filepath.IsAbs(gate.ComponentRoot) {
 				dir = gate.ComponentRoot
+				if relative, err := filepath.Rel(root, dir); err == nil && isWithinPath(relative) {
+					dir = filepath.Join(workRoot, relative)
+				}
 			} else {
-				dir = filepath.Join(root, gate.ComponentRoot)
+				dir = filepath.Join(workRoot, gate.ComponentRoot)
 			}
 		}
 	}

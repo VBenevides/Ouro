@@ -286,11 +286,15 @@ func removeCodeQLDatabase(root, database string) error {
 }
 
 func analyzeCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, executable string, runner process.Runner, paths codeQLPaths, base *Result) (Status, string, []findings.Finding, string) {
+	sourceRoot := root
+	if cfg.SourceRoot != "" {
+		sourceRoot = cfg.SourceRoot
+	}
 	createArgs := []string{"database", "create", paths.database}
 	if len(paths.languages) > 1 {
 		createArgs = append(createArgs, "--db-cluster")
 	}
-	createArgs = append(createArgs, "--language", strings.Join(paths.languages, ","), "--source-root", root)
+	createArgs = append(createArgs, "--language", strings.Join(paths.languages, ","), "--source-root", sourceRoot)
 	if paths.overlay == nil {
 		createArgs = append(createArgs, "--overwrite")
 	} else if paths.overlay.restored {
