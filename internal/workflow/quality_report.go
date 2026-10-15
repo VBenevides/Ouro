@@ -31,28 +31,30 @@ type QualityReport struct {
 }
 
 type QualityCheckReport struct {
-	Name            string       `json:"name"`
-	Level           string       `json:"level"`
-	Category        string       `json:"category"`
-	Status          gates.Status `json:"status"`
-	Required        bool         `json:"required"`
-	Detail          string       `json:"detail"`
-	Command         []string     `json:"command,omitempty"`
-	Stdout          string       `json:"stdout"`
-	Stderr          string       `json:"stderr"`
-	ExitCode        int          `json:"exit_code"`
-	OutputTruncated bool         `json:"output_truncated"`
-	Fresh           bool         `json:"fresh"`
-	Stale           bool         `json:"stale,omitempty"`
-	InputHash       string       `json:"input_hash,omitempty"`
-	ProjectSnapshot string       `json:"project_snapshot,omitempty"`
-	Tool            string       `json:"tool,omitempty"`
-	ToolVersion     string       `json:"tool_version,omitempty"`
-	Language        string       `json:"language,omitempty"`
-	Profile         string       `json:"profile,omitempty"`
-	ComponentRoot   string       `json:"component_root,omitempty"`
-	StartedAt       time.Time    `json:"started_at"`
-	FinishedAt      time.Time    `json:"finished_at"`
+	Name              string            `json:"name"`
+	Level             string            `json:"level"`
+	Category          string            `json:"category"`
+	Status            gates.Status      `json:"status"`
+	Required          bool              `json:"required"`
+	Detail            string            `json:"detail"`
+	Command           []string          `json:"command,omitempty"`
+	Stdout            string            `json:"stdout"`
+	Stderr            string            `json:"stderr"`
+	ExitCode          int               `json:"exit_code"`
+	OutputTruncated   bool              `json:"output_truncated"`
+	OutputLogs        []gates.OutputLog `json:"output_logs,omitempty"`
+	PreviewLimitBytes int               `json:"preview_limit_bytes"`
+	Fresh             bool              `json:"fresh"`
+	Stale             bool              `json:"stale,omitempty"`
+	InputHash         string            `json:"input_hash,omitempty"`
+	ProjectSnapshot   string            `json:"project_snapshot,omitempty"`
+	Tool              string            `json:"tool,omitempty"`
+	ToolVersion       string            `json:"tool_version,omitempty"`
+	Language          string            `json:"language,omitempty"`
+	Profile           string            `json:"profile,omitempty"`
+	ComponentRoot     string            `json:"component_root,omitempty"`
+	StartedAt         time.Time         `json:"started_at"`
+	FinishedAt        time.Time         `json:"finished_at"`
 }
 
 func (r QualityReport) ValidateDeep() error {
@@ -212,6 +214,7 @@ func BuildQualityReport(stage string, levels []string, status string, results []
 			Name: result.Name, Level: result.Level, Category: result.Category, Status: result.Status,
 			Required: result.Required, Detail: detail, Command: command, Stdout: stdout,
 			Stderr: stderr, ExitCode: result.ExitCode, OutputTruncated: result.OutputTruncated || detailTruncated || stdoutTruncated || stderrTruncated,
+			OutputLogs: append([]gates.OutputLog(nil), result.OutputLogs...), PreviewLimitBytes: qualityReportDiagnosticLimit,
 			Fresh: result.Fresh, Stale: result.Stale, InputHash: result.InputHash, ProjectSnapshot: result.ProjectSnapshot, Tool: result.Tool, ToolVersion: result.ToolVersion, Language: result.Language,
 			Profile: result.Profile, ComponentRoot: result.ComponentRoot,
 			StartedAt: result.StartedAt, FinishedAt: result.FinishedAt,
@@ -226,8 +229,8 @@ func boundedQualityText(value string) (string, bool) {
 		return value, false
 	}
 	const marker = "… [truncated]"
-	limit := qualityReportDiagnosticLimit - len(marker)
-	return strings.ToValidUTF8(value[:limit], "\uFFFD") + marker, true
+	limit := (qualityReportDiagnosticLimit - len(marker)) / 2
+	return strings.ToValidUTF8(value[:limit], "") + marker + strings.ToValidUTF8(value[len(value)-limit:], ""), true
 }
 
 func WriteQualityReports(root string, report QualityReport) (string, string, error) {
@@ -322,6 +325,9 @@ func QualityReportMarkdown(report QualityReport) string {
 	}
 	for index, check := range report.Checks {
 		fmt.Fprintf(&out, "## %d. %s\n\n- level: %s\n- category: %s\n- status: %s\n- required: %t\n- command: `%s`\n- exit_code: %d\n- output_truncated: %t\n- fresh: %t\n- stale: %t\n- started_at: %s\n- finished_at: %s\n- detail: %s\n\n", index+1, qualityMarkdownLine(check.Name), qualityMarkdownLine(check.Level), qualityMarkdownLine(check.Category), qualityMarkdownLine(string(check.Status)), check.Required, qualityMarkdownLine(strings.Join(check.Command, " ")), check.ExitCode, check.OutputTruncated, check.Fresh, check.Stale, check.StartedAt.UTC().Format(time.RFC3339Nano), check.FinishedAt.UTC().Format(time.RFC3339Nano), qualityMarkdownLine(check.Detail))
+		for _, log := range check.OutputLogs {
+			fmt.Fprintf(&out, "- %s_log: `%s` (relative to project root; redacted=%t, complete=%t, bytes_seen=%d, bytes_written=%d, omitted_bytes=%d, limit_bytes=%d, line_limit_bytes=%d)\n", log.Stream, qualityMarkdownLine(log.Path), log.Redacted, log.Complete, log.BytesSeen, log.BytesWritten, log.OmittedBytes, log.LimitBytes, log.LineLimitBytes)
+		}
 		qualityMarkdownOutput(&out, "stdout", check.Stdout)
 		qualityMarkdownOutput(&out, "stderr", check.Stderr)
 	}

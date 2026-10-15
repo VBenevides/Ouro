@@ -14,10 +14,10 @@ import (
 	"github.com/VBenevides/Ouro/internal/process"
 )
 
-// QualityMirror is a private working copy that contains only quality inputs
-// (files not ignored by Git). Analyzers run inside it, so recursive tools such
-// as `ruff check .` cannot reach ignored directories. Changes made by gates
-// are synchronised back with Sync.
+// QualityMirror is a private working copy of non-ignored quality inputs.
+// Installed node_modules are copied separately as runtime prerequisites, not
+// source inputs, and never synchronised back. Other ignored files remain absent.
+// Changes made to source inputs by gates are synchronised back with Sync.
 type QualityMirror struct {
 	Root   string
 	source string
@@ -46,6 +46,9 @@ func NewQualityMirror(ctx context.Context, source string) (*QualityMirror, error
 			return nil, errors.Join(fmt.Errorf("mirror quality input %q: %w", relative, err), mirror.Close())
 		}
 		mirror.files[relative] = true
+	}
+	if err := mirror.copyNodeDependencies(ctx); err != nil {
+		return nil, errors.Join(err, mirror.Close())
 	}
 	return mirror, nil
 }
@@ -92,6 +95,9 @@ func copyFile(from, to string, mode os.FileMode) error {
 func (m *QualityMirror) Sync(ctx context.Context) error {
 	var created []string
 	err := filepath.WalkDir(m.Root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if entry != nil && entry.IsDir() && entry.Name() == "node_modules" {
+			return filepath.SkipDir
+		}
 		if walkErr != nil || entry.IsDir() || !entry.Type().IsRegular() {
 			return walkErr
 		}

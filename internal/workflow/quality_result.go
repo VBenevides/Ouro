@@ -46,7 +46,7 @@ func buildStructuredQualityResult(options QualityOptions, execution qualityExecu
 		},
 		Gates:              gatesResult,
 		Findings:           structuredFindings,
-		Artifacts:          []quality.Artifact{},
+		Artifacts:          gateLogArtifacts(execution.results),
 		Diagnostics:        diagnostics,
 		DiagnosticsOmitted: diagnosticsOmitted,
 		Summary: quality.Summary{
@@ -60,6 +60,28 @@ func buildStructuredQualityResult(options QualityOptions, execution qualityExecu
 		Prerequisites: execution.prerequisites,
 	}
 	return result, nil
+}
+
+func gateLogArtifactID(log gates.OutputLog) string {
+	return quality.IdentityHash([]byte(log.Path + "\x00" + log.SHA256))
+}
+
+func gateLogArtifactIDs(logs []gates.OutputLog) []string {
+	ids := make([]string, 0, len(logs))
+	for _, log := range logs {
+		ids = append(ids, gateLogArtifactID(log))
+	}
+	return ids
+}
+
+func gateLogArtifacts(results []gates.Result) []quality.Artifact {
+	artifacts := []quality.Artifact{}
+	for _, result := range results {
+		for _, log := range result.OutputLogs {
+			artifacts = append(artifacts, quality.Artifact{ID: gateLogArtifactID(log), Kind: "gate-" + log.Stream, Path: log.Path, SHA256: log.SHA256, MediaType: "text/plain", Capture: &quality.LogCapture{Stream: log.Stream, BytesSeen: log.BytesSeen, BytesWritten: log.BytesWritten, OmittedBytes: log.OmittedBytes, LimitBytes: log.LimitBytes, LineLimitBytes: log.LineLimitBytes, PreviewOmittedBytes: log.PreviewOmittedBytes, Complete: log.Complete, Redacted: log.Redacted}})
+		}
+	}
+	return artifacts
 }
 
 func structuredGateResults(plan quality.Plan, legacy []gates.Result, root string) []quality.GateResult {
@@ -99,7 +121,7 @@ func structuredGateResults(plan quality.Plan, legacy []gates.Result, root string
 			FinishedAt:  qualityTimePointer(legacyResult.FinishedAt),
 			Tool:        quality.ToolIdentity{Name: legacyResult.Tool, Version: legacyResult.ToolVersion},
 			ExitCode:    qualityIntPointer(legacyResult.ExitCode),
-			ArtifactIDs: []string{},
+			ArtifactIDs: gateLogArtifactIDs(legacyResult.OutputLogs),
 		})
 	}
 	return result

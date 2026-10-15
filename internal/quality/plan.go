@@ -471,11 +471,19 @@ func (state *plannerState) checkCommand(command []string, componentRoot string) 
 	} else {
 		result = state.probeReadiness(base, resolved, result)
 	}
+	if local, _ := process.LocalNodeTool(state.root, componentRoot, base); local != "" {
+		result.reason += " Selected project-local executable: " + resolved + "."
+	} else if base == "eslint" || base == "tsc" {
+		result.reason += " Global executable fallback: local tool is absent; selected " + resolved + ". Global package fallback is not supported; install missing packages locally."
+	}
 	state.readied[key] = result
 	return result
 }
 
 func (state *plannerState) resolveExecutable(base, componentRoot string) (string, error) {
+	if local, err := process.LocalNodeTool(state.root, componentRoot, base); err != nil || local != "" {
+		return local, err
+	}
 	lookup := state.lookup
 	if lookup == nil {
 		lookup = exec.LookPath

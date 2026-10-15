@@ -38,6 +38,9 @@ type Command struct {
 	MaxOutputBytes int
 	Progress       io.Writer
 	Stdout         func([]byte)
+	// Output sinks receive every byte, independently of the in-memory limit.
+	StdoutWriter io.Writer
+	StderrWriter io.Writer
 }
 
 type Result struct {
@@ -120,6 +123,12 @@ func (OSRunner) Run(parent context.Context, command Command) Result {
 	stdout.onWrite = command.Stdout
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	if command.StdoutWriter != nil {
+		cmd.Stdout = io.MultiWriter(command.StdoutWriter, &stdout)
+	}
+	if command.StderrWriter != nil {
+		cmd.Stderr = io.MultiWriter(command.StderrWriter, &stderr)
+	}
 	err := cmd.Run()
 	result.Stdout = stdout.Bytes()
 	result.Stderr = stderr.Bytes()

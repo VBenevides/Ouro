@@ -109,6 +109,11 @@ func filesystemQualityFiles(ctx context.Context, root string) ([]string, error) 
 }
 
 func qualityRuntimePath(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == "node_modules" {
+			return true
+		}
+	}
 	first, _, _ := strings.Cut(path, "/")
 	return first == ".git" || first == ".ouro" || first == ".agent-work"
 }

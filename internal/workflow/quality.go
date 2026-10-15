@@ -440,11 +440,15 @@ func executeQualityStages(ctx context.Context, options QualityOptions, stages []
 	return execution, executionErr
 }
 
+func qualityGateLogDir(options QualityOptions) string {
+	return filepath.Join(options.Root, ".ouro", "runs", options.RunID, "artifacts", "gate-output")
+}
+
 func executeFormattingStages(ctx context.Context, options QualityOptions, stages []qualityStageGates, runner process.ProgressRunner, plan quality.Plan, execution *qualityExecution) {
 	for index := range stages {
 		formatting, checks := splitFormattingGates(stages[index].selected, options.AutoFormat)
 		stages[index].selected = checks
-		execution.results = append(execution.results, gates.Executor{Runner: runner, Progress: options.Progress, WorkRoot: execution.mirror.Root}.Run(ctx, options.Root, formatting, false, qualityDeclaredOutputs(plan)...)...)
+		execution.results = append(execution.results, gates.Executor{Runner: runner, Progress: options.Progress, WorkRoot: execution.mirror.Root, LogDir: qualityGateLogDir(options)}.Run(ctx, options.Root, formatting, false, qualityDeclaredOutputs(plan)...)...)
 		if err := execution.mirror.Sync(ctx); err != nil {
 			execution.results = append(execution.results, qualityErrorResult("quality-input-sync", "fast", "system", true, err))
 		}
@@ -452,7 +456,7 @@ func executeFormattingStages(ctx context.Context, options QualityOptions, stages
 }
 
 func executeQualityStage(ctx context.Context, options QualityOptions, stage qualityStageGates, coveragePath string, runner process.ProgressRunner, plan quality.Plan, execution *qualityExecution) ([]gates.Result, error) {
-	stageResults := gates.Executor{Runner: runner, Progress: options.Progress, WorkRoot: execution.mirror.Root}.Run(ctx, options.Root, stage.selected, stage.generic.Parallel, qualityDeclaredOutputs(plan)...)
+	stageResults := gates.Executor{Runner: runner, Progress: options.Progress, WorkRoot: execution.mirror.Root, LogDir: qualityGateLogDir(options)}.Run(ctx, options.Root, stage.selected, stage.generic.Parallel, qualityDeclaredOutputs(plan)...)
 	if err := execution.mirror.Sync(ctx); err != nil {
 		stageResults = append(stageResults, qualityErrorResult("quality-input-sync", stage.level, "system", true, err))
 	}
@@ -659,7 +663,9 @@ func sanitizeQualityReceiptGates(results []gates.Result) []gates.Result {
 		sanitized[index] = result
 		sanitized[index].Tool, _ = boundedQualityText(result.Tool)
 		sanitized[index].ToolVersion, _ = boundedQualityText(result.ToolVersion)
-		sanitized[index].Detail, sanitized[index].OutputTruncated = boundedQualityText(result.Detail)
+		detail, detailTruncated := boundedQualityText(result.Detail)
+		sanitized[index].Detail = detail
+		sanitized[index].OutputTruncated = result.OutputTruncated || detailTruncated
 		stdout, stdoutTruncated := boundedQualityText(result.Stdout)
 		stderr, stderrTruncated := boundedQualityText(result.Stderr)
 		sanitized[index].Stdout = stdout
