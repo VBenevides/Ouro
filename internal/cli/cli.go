@@ -45,7 +45,7 @@ var helpEntries = map[string]helpEntry{
 	"version":  {"print the embedded Ouro version", "ouro version", "none"},
 	"init":     {"initialize or refresh Ouro quality metadata in an existing project", "ouro init [--force] [--level LEVEL] [--root PATH]", "--root PATH      project root (default: current directory)\n--force          refresh existing configuration and detected integrations\n--level LEVEL    fast, deep, or strict; auto-selects deep when CodeQL or SonarQube is available"},
 	"doctor":   {"check configuration, language coverage, Git, tools, and quality preflight", "ouro doctor [--root PATH] [--json]", "--root PATH  project root\n--json       write machine-readable diagnostics and a quality plan"},
-	"quality":  {"run configured quality gates or inspect readiness", "ouro quality [--root PATH] [--stage STAGE] [--run-id ID] [--plan] [--json]", "--root PATH   project root (default: current directory)\n--stage STAGE  fast, deep (fast + deep), or strict (fast + deep + strict); defaults to quality.profile or deep\n--run-id ID    durable quality run ID; generated when omitted\n--plan         report gate discovery and local readiness without running gates\n--json         write the plan or completed run result as JSON"},
+	"quality":  {"run configured quality gates or inspect readiness", "ouro quality [--root PATH] [--stage STAGE] [--item [NAME]] [--run-id ID] [--plan] [--json]", "--root PATH   project root (default: current directory)\n--stage STAGE  fast, deep (fast + deep), or strict (fast + deep + strict); defaults to quality.profile or deep\n--item [NAME] exact configured gate name; repeatable or comma-separated; omit NAME to list all project items without execution\n--run-id ID    durable quality run ID; generated when omitted\n--plan         report gate discovery and local readiness without running gates\n--json         write the item list, plan, or completed run result as JSON"},
 	"setup":    {"run explicit tool provisioning guidance or a supplied setup executable", "ouro setup [--root PATH] --tool NAME [--executable PATH] [--arg ARG]...", "--root PATH       project root (default: current directory)\n--tool NAME       tool to provision\n--executable PATH explicit setup executable\n--arg ARG         executable argument; repeatable"},
 	"tools":    {"check whether external tools are available", "ouro tools [NAME...]", "NAME  optional tool names; defaults to common Ouro tools"},
 	"services": {"check or explicitly control an external service", "ouro services [--url URL] [--action ACTION] [--executable PATH] [--arg ARG]...", "--url URL          service URL for status checks\n--action ACTION    status, start, or stop\n--executable PATH explicit service lifecycle executable\n--arg ARG          executable argument; repeatable"},
@@ -217,7 +217,9 @@ func runQuality(args []string, out, errOut io.Writer) int {
 	runID := flags.String("run-id", "", "durable quality run ID; generated when omitted")
 	planOnly := flags.Bool("plan", false, "report local readiness without running gates")
 	jsonOutput := flags.Bool("json", false, "write the plan or run result as JSON")
-	if err := flags.Parse(args); err != nil {
+	var items qualityItemFlag
+	flags.Var(&items, "item", "exact gate name; omit the value to list project items")
+	if err := flags.Parse(qualityItemArguments(args)); err != nil {
 		return 2
 	}
 	if flags.NArg() > 0 {
@@ -232,7 +234,7 @@ func runQuality(args []string, out, errOut io.Writer) int {
 	})
 	if stageExplicit {
 		value := strings.ToLower(strings.TrimSpace(*stage))
-		if value != "fast" && value != "deep" && value != "strict" {
+		if !validQualityStage(value) {
 			_, _ = fmt.Fprintf(errOut, "ouro quality: invalid quality stage %q\n", *stage)
 			return 2
 		}
@@ -260,18 +262,38 @@ func runQuality(args []string, out, errOut io.Writer) int {
 		}
 	}
 	stageValue = strings.ToLower(strings.TrimSpace(stageValue))
-	if stageValue != "fast" && stageValue != "deep" && stageValue != "strict" {
+	if !validQualityStage(stageValue) {
 		_, _ = fmt.Fprintf(errOut, "ouro quality: invalid quality stage %q\n", stageValue)
 		return 2
 	}
-	if *planOnly {
-		return runQualityPlan(abs, cfg, stageValue, *jsonOutput, out, errOut)
+	if items.requested && len(items.names) == 0 {
+		return runQualityItems(abs, cfg, *jsonOutput, out, errOut)
 	}
-	return runQualityExecution(abs, cfg, stageValue, strings.TrimSpace(*runID), *jsonOutput, out, errOut)
+	if *planOnly {
+		return runQualityPlan(abs, cfg, stageValue, *jsonOutput, out, errOut, items.names...)
+	}
+	return runSelectedQualityExecution(abs, cfg, stageValue, qualityExecutionSelection{runID: strings.TrimSpace(*runID), items: items.names}, *jsonOutput, out, errOut)
 }
 
-func runQualityPlan(root string, cfg config.Config, stage string, jsonOutput bool, out, errOut io.Writer) int {
+func validQualityStage(stage string) bool {
+	return stage == "fast" || stage == "deep" || stage == "strict"
+}
+
+func appendQualityItems(items *[]string, value string) error {
+	for _, item := range strings.Split(value, ",") {
+		if strings.TrimSpace(item) == "" {
+			return fmt.Errorf("quality item must not be empty")
+		}
+		*items = append(*items, item)
+	}
+	return nil
+}
+
+func runQualityPlan(root string, cfg config.Config, stage string, jsonOutput bool, out, errOut io.Writer, items ...string) int {
 	plan, err := qualityplan.BuildPlan(context.Background(), qualityplan.PlanOptions{Root: root, Config: cfg, Profile: stage})
+	if err == nil {
+		plan, err = qualityplan.SelectItems(plan, items)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "ouro quality plan: %v\n", err)
 		return 1
@@ -296,7 +318,13 @@ func runQualityPlan(root string, cfg config.Config, stage string, jsonOutput boo
 	return 0
 }
 
-func runQualityExecution(root string, cfg config.Config, stage, runID string, jsonOutput bool, out, errOut io.Writer) int {
+type qualityExecutionSelection struct {
+	runID string
+	items []string
+}
+
+func runSelectedQualityExecution(root string, cfg config.Config, stage string, selection qualityExecutionSelection, jsonOutput bool, out, errOut io.Writer) int {
+	runID := selection.runID
 	allocatedRunID, err := qualityplan.AllocateRunID(root, runID)
 	if err != nil {
 		_, _ = fmt.Fprintf(errOut, "ouro quality: allocate run ID: %v\n", err)
@@ -313,7 +341,8 @@ func runQualityExecution(root string, cfg config.Config, stage, runID string, js
 	ctx, stop := qualitySignalContext()
 	defer stop()
 	result, err := workflow.RunQuality(ctx, workflow.QualityOptions{
-		Root: root, RunID: runID, RunIDReserved: true, Stage: stage, Iteration: 1, Config: cfg, Ephemeral: true, AutoFormat: false, Progress: progress, CheckReadiness: true,
+		Items: selection.items,
+		Root:  root, RunID: runID, RunIDReserved: true, Stage: stage, Iteration: 1, Config: cfg, Ephemeral: true, AutoFormat: false, Progress: progress, CheckReadiness: true,
 	})
 	if result.RunResult != nil {
 		commandResult := qualityplan.BuildCommandResult(

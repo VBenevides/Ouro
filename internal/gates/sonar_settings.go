@@ -101,50 +101,8 @@ func parseSonarProperties(data []byte) (map[string]string, error) {
 		if line == "" || line[0] == '#' || line[0] == '!' {
 			continue
 		}
-		var logicalLine strings.Builder
-		for {
-			backslashes := 0
-			for n := len(line) - 1; n >= 0 && line[n] == '\\'; n-- {
-				backslashes++
-			}
-			if backslashes%2 == 0 {
-				break
-			}
-			logicalLine.WriteString(line[:len(line)-1])
-			index++
-			if index >= len(lines) {
-				line = ""
-				break
-			}
-			line = strings.TrimLeft(lines[index], " \t\f")
-		}
-		if logicalLine.Len() > 0 {
-			logicalLine.WriteString(line)
-			line = logicalLine.String()
-		}
-		end, escaped := 0, false
-		for end < len(line) {
-			char := line[end]
-			if !escaped && (char == '=' || char == ':' || char == ' ' || char == '\t' || char == '\f') {
-				break
-			}
-			if char == '\\' {
-				escaped = !escaped
-			} else {
-				escaped = false
-			}
-			end++
-		}
-		valueStart := end
-		for valueStart < len(line) && strings.ContainsRune(" \t\f", rune(line[valueStart])) {
-			valueStart++
-		}
-		if valueStart < len(line) && (line[valueStart] == '=' || line[valueStart] == ':') {
-			valueStart++
-		}
-		for valueStart < len(line) && strings.ContainsRune(" \t\f", rune(line[valueStart])) {
-			valueStart++
-		}
+		line, index = sonarLogicalLine(lines, index, line)
+		end, valueStart := sonarPropertyBounds(line)
 		key, err := decodeSonarProperty(line[:end])
 		if err != nil {
 			return nil, fmt.Errorf("malformed Sonar settings at logical line %d", index+1)
@@ -156,6 +114,67 @@ func parseSonarProperties(data []byte) (map[string]string, error) {
 		properties[key] = value
 	}
 	return properties, nil
+}
+
+func sonarLogicalLine(lines []string, index int, line string) (string, int) {
+	var logicalLine strings.Builder
+	for {
+		backslashes := 0
+		for n := len(line) - 1; n >= 0 && line[n] == '\\'; n-- {
+			backslashes++
+		}
+		if backslashes%2 == 0 {
+			break
+		}
+		logicalLine.WriteString(line[:len(line)-1])
+		index++
+		if index >= len(lines) {
+			line = ""
+			break
+		}
+		line = strings.TrimLeft(lines[index], " \t\f")
+	}
+	if logicalLine.Len() > 0 {
+		logicalLine.WriteString(line)
+		line = logicalLine.String()
+	}
+	return line, index
+}
+
+func sonarPropertyBounds(line string) (int, int) {
+	end, escaped := 0, false
+	for end < len(line) {
+		char := line[end]
+		if !escaped && strings.ContainsRune("=: \t\f", rune(char)) {
+			break
+		}
+		if char == '\\' {
+			escaped = !escaped
+		} else {
+			escaped = false
+		}
+		end++
+	}
+	valueStart := end
+	for valueStart < len(line) && strings.ContainsRune(" \t\f", rune(line[valueStart])) {
+		valueStart++
+	}
+	if valueStart < len(line) && (line[valueStart] == '=' || line[valueStart] == ':') {
+		valueStart++
+	}
+	for valueStart < len(line) && strings.ContainsRune(" \t\f", rune(line[valueStart])) {
+		valueStart++
+	}
+	return end, valueStart
+}
+
+func validateSonarSurrogates(units []uint16) error {
+	for index, unit := range units {
+		if unit >= 0xD800 && unit <= 0xDBFF && (index+1 == len(units) || units[index+1] < 0xDC00 || units[index+1] > 0xDFFF) || unit >= 0xDC00 && unit <= 0xDFFF && (index == 0 || units[index-1] < 0xD800 || units[index-1] > 0xDBFF) {
+			return errors.New("invalid Unicode surrogate")
+		}
+	}
+	return nil
 }
 
 func decodeSonarProperty(value string) (string, error) {
@@ -194,10 +213,8 @@ func decodeSonarProperty(value string) (string, error) {
 			units = append(units, uint16(char))
 		}
 	}
-	for index, unit := range units {
-		if unit >= 0xD800 && unit <= 0xDBFF && (index+1 == len(units) || units[index+1] < 0xDC00 || units[index+1] > 0xDFFF) || unit >= 0xDC00 && unit <= 0xDFFF && (index == 0 || units[index-1] < 0xD800 || units[index-1] > 0xDBFF) {
-			return "", errors.New("invalid Unicode surrogate")
-		}
+	if err := validateSonarSurrogates(units); err != nil {
+		return "", err
 	}
 	return string(utf16.Decode(units)), nil
 }

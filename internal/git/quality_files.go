@@ -41,12 +41,16 @@ func QualityFiles(ctx context.Context, root string) ([]string, error) {
 	if (ignored.ExitCode != 0 && ignored.ExitCode != 1) || ignored.StdoutTruncated || ignored.StderrTruncated || ignored.Status == process.StatusCancelled || ignored.Status == process.StatusTimeout {
 		return nil, fmt.Errorf("filter Git quality inputs: %s", processSummary(ignored))
 	}
+	return selectGitQualityFiles(root, listed.Stdout, ignored.Stdout)
+}
+
+func selectGitQualityFiles(root string, listed, ignored []byte) ([]string, error) {
 	excluded := make(map[string]bool)
-	for _, path := range strings.Split(string(ignored.Stdout), "\x00") {
+	for _, path := range strings.Split(string(ignored), "\x00") {
 		excluded[path] = true
 	}
 	selected := make(map[string]bool)
-	for _, path := range strings.Split(string(listed.Stdout), "\x00") {
+	for _, path := range strings.Split(string(listed), "\x00") {
 		if path == "" || excluded[path] || qualityRuntimePath(path) {
 			continue
 		}

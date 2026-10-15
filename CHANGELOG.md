@@ -2,6 +2,12 @@
 
 All notable changes to Ouro are documented here.
 
+## [0.1.2] - 2026-10-14
+
+### Features
+
+- Add repeatable, comma-separated `ouro quality --item NAME` selection using exact configured gate names, with targeted plans and rejection of unavailable names or stages. A bare `--item` lists all applicable project items without executing gates; `--json` returns an `items` array. Aliases are not supported.
+
 ## [0.1.1] - 2026-10-09
 
 ### Features

@@ -1,6 +1,6 @@
 # Ouro
 
-Release version: **0.1.0**. `VERSION` is embedded in the executable at build time.
+Release version: **0.1.2**. `VERSION` is embedded in the executable at build time.
 
 Ouro is a deterministic quality-gate runner for an existing Git repository. It
 runs configured checks, stores immutable per-run evidence, and returns a
@@ -35,6 +35,18 @@ configuration after these inputs change. Quality configuration is stored in
 requirements, executable readiness, omissions, and unsupported languages. It
 does not run project gates or contact external services. A zero exit means local
 preflight is complete; it is not a quality pass.
+
+Run `ouro quality --item` to list all applicable configured items for this project,
+across all stages, without running gates. Add `--json` for an `items` array.
+The list includes items whose tools are missing; listing does not prove readiness.
+Use an exact name from that list, including case; aliases are not supported:
+`ouro quality --item sonar` or `ouro quality --item go-lint`.
+Repeat `--item` or separate exact names with commas to select multiple checks,
+for example `ouro quality --item codeql,go-lint`. Items must be enabled by the
+repository configuration and included in the selected execution stage; use
+`--stage deep` for CodeQL or SonarQube when needed.
+Combine a named selection with `--plan` to inspect only selected items.
+A targeted pass applies only to those checks, not to the full quality profile.
 
 Before every quality execution (`fast`, `deep`, or `strict`), Ouro reports
 prerequisite readiness for all selected language-specific and configured checks.

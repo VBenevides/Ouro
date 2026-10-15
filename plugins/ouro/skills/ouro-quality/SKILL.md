@@ -42,12 +42,14 @@ edits: report the warnings and state explicitly that the result is not a pass.
 
 1. Verify the local executable and initialize only if configuration is absent.
 2. Run the configured quality profile, or the explicitly requested `--stage`,
-   with `--json`.
+   with `--json`. For a single-item task, use `--item NAME` instead of running
+   the entire profile (see below).
 3. Read `status` and inspect the returned run's per-gate results and diagnostics.
 4. For an assessment-only request, report the result without changing files.
    When remediation is authorized, fix the underlying code, configuration, tool,
    or service issue with the smallest justified change.
-5. Run Ouro quality again with the same profile in a new run directory.
+5. Run Ouro quality again with the same profile and item selection, if any,
+   in a new run directory.
 6. Continue authorized remediation until `PASS`; if a concrete blocker remains,
    report the exact failing gate, attempted repair, and missing prerequisite.
    Never describe a blocked or warning-bearing result as a pass.
@@ -70,7 +72,9 @@ direct a tool at an ignored path to obtain a pass.
 
 To check whether source, configuration, tool, or service changes worked, rerun
 `"${OURO_BIN:-ouro}" quality --root "$PWD" --json`, keeping the same requested
-`--stage` when applicable. Each rerun must create a new run directory.
+`--stage` and `--item` selection when applicable. Each rerun must create a new
+run directory. A single-item fix can be verified with `--item NAME`; it does
+not require running unrelated gates.
 
 Do not bypass Ouro by invoking underlying test, lint, coverage, scanner, or audit
 commands directly, or querying analyzer/service endpoints to verify a fix. Do not
@@ -82,6 +86,43 @@ Read-only readiness commands are not substitutes for a completed quality run.
 If Ouro's artifacts omit necessary diagnostics, report that evidence gap rather
 than constructing a parallel verification path. Only a completed new Ouro run
 can establish the result after a change; previous artifacts describe the prior state.
+
+## Run a single item (Ouro 0.1.2+)
+
+First list the project's available items without running gates:
+
+```sh
+"${OURO_BIN:-ouro}" quality --root "$PWD" --item --json
+```
+
+Read the returned `items` array and use the exact name, including case.
+There are no aliases. Listing includes applicable items across all configured
+stages, even if an executable is missing; it does not prove readiness or a pass.
+For a request to analyze or fix one item, select only that item:
+
+```sh
+"${OURO_BIN:-ouro}" quality --root "$PWD" --stage deep --item sonar --json
+"${OURO_BIN:-ouro}" quality --root "$PWD" --stage deep --item codeql --json
+"${OURO_BIN:-ouro}" quality --root "$PWD" --item go-lint --json
+```
+
+Choose one command for the requested item, only if its name appears in the list.
+Do not run all three. `go-lint` runs golangci-lint; `sonar` runs SonarQube.
+The item must be enabled and applicable in the repository configuration
+established by `ouro init`, and included in the selected stage. Use
+`--stage deep` for CodeQL or SonarQube if the configured profile is `fast`.
+Do not enable an unavailable item or change gate policy merely to obtain a pass.
+If selection is rejected, report the configuration/stage mismatch.
+
+Add `--plan --json` to the same selection to inspect readiness without execution.
+For multiple items, repeat `--item` or use `--item codeql,go-lint`.
+After an authorized fix, rerun the same item and stage with `--json` and inspect
+the new run's status, results, and artifacts. Do not invoke the analyzer directly.
+
+A targeted `PASS` proves only the selected items passed. Report that scope
+explicitly. For a request to make the entire quality gate pass, targeted runs
+can support intermediate fixes, but final verification must omit `--item` and
+run the full requested profile. Never substitute a targeted pass for a full pass.
 
 ## Configure SonarQube
 
