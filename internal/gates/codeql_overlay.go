@@ -54,17 +54,9 @@ func prepareCodeQLOverlay(ctx context.Context, root, executable string, runner p
 	if !packs.Passed() || packs.StdoutTruncated || packs.StderrTruncated {
 		return nil, nil, fmt.Errorf("resolve overlay query packs: %s (status=%s); using full analysis", redact(strings.TrimSpace(packs.Err+" "+string(packs.Stderr))), packs.Status)
 	}
-	toolchains := make(map[string]string)
-	for _, language := range paths.languages {
-		tool, args := "go", []string{"version"}
-		if language == "javascript" {
-			tool, args = "node", []string{"--version"}
-		}
-		result := runner.Run(ctx, process.Command{Executable: tool, Args: args, Label: "codeql overlay toolchain version", Dir: root, Environment: gateEnvironment(nil), ClearEnv: true, Timeout: codeQLCommandTimeout})
-		if !result.Passed() || result.StdoutTruncated || result.StderrTruncated || len(result.Stdout) == 0 {
-			return nil, nil, fmt.Errorf("overlay %s version: %s (status=%s); using full analysis", tool, redact(strings.TrimSpace(result.Err+" "+string(result.Stderr))), result.Status)
-		}
-		toolchains[tool] = strings.TrimSpace(string(result.Stdout))
+	toolchains, err := overlayToolchainVersions(ctx, root, runner, paths.languages)
+	if err != nil {
+		return nil, nil, err
 	}
 	identity, err := json.Marshal(struct {
 		Schema      int
@@ -160,6 +152,22 @@ func prepareCodeQLOverlay(ctx context.Context, root, executable string, runner p
 	return overlay, release, nil
 }
 
+func overlayToolchainVersions(ctx context.Context, root string, runner process.Runner, languages []string) (map[string]string, error) {
+	toolchains := make(map[string]string)
+	for _, language := range languages {
+		tool, args := "go", []string{"version"}
+		if language == "javascript" {
+			tool, args = "node", []string{"--version"}
+		}
+		result := runner.Run(ctx, process.Command{Executable: tool, Args: args, Label: "codeql overlay toolchain version", Dir: root, Environment: gateEnvironment(nil), ClearEnv: true, Timeout: codeQLCommandTimeout})
+		if !result.Passed() || result.StdoutTruncated || result.StderrTruncated || len(result.Stdout) == 0 {
+			return nil, fmt.Errorf("overlay %s version: %s (status=%s); using full analysis", tool, redact(strings.TrimSpace(result.Err+" "+string(result.Stderr))), result.Status)
+		}
+		toolchains[tool] = strings.TrimSpace(string(result.Stdout))
+	}
+	return toolchains, nil
+}
+
 func overlayLanguagesSupported(version string, languages []string) bool {
 	if !codeQLVersionAtLeast(version, 2, 24, 2) || len(languages) == 0 {
 		return false
@@ -191,6 +199,8 @@ func codeQLVersionAtLeast(version string, major, minor, patch int) bool {
 	return true
 }
 
+const overlayGitListFiles = "ls-files"
+
 func codeQLIndexFiles(ctx context.Context, root string, runner process.Runner) (map[string]string, error) {
 	git := func(args ...string) ([]byte, error) {
 		result := runner.Run(ctx, process.Command{Executable: "git", Args: args, Label: "codeql overlay git inputs", Dir: root, Environment: gateEnvironment(nil), ClearEnv: true, Timeout: codeQLCommandTimeout})
@@ -221,7 +231,7 @@ func codeQLIndexFiles(ctx context.Context, root string, runner process.Runner) (
 	if len(unstaged) != 0 {
 		return nil, errors.New("git index does not match working tree; using full analysis (Ouro does not stage files)")
 	}
-	flags, err := git("ls-files", "-v", "-z")
+	flags, err := git(overlayGitListFiles, "-v", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +242,7 @@ func codeQLIndexFiles(ctx context.Context, root string, runner process.Runner) (
 	}
 	// Include ignored files too: overlays cannot safely infer changes to source
 	// that is absent from the index. Tool-owned runtime directories are exempt.
-	untracked, err := git("ls-files", "--others", "-z")
+	untracked, err := git(overlayGitListFiles, "--others", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -241,10 +251,14 @@ func codeQLIndexFiles(ctx context.Context, root string, runner process.Runner) (
 			return nil, errors.New("untracked/ignored files are not overlay-safe; using full analysis")
 		}
 	}
-	index, err := git("ls-files", "--stage", "-z")
+	index, err := git(overlayGitListFiles, "--stage", "-z")
 	if err != nil {
 		return nil, err
 	}
+	return parseCodeQLIndex(index)
+}
+
+func parseCodeQLIndex(index []byte) (map[string]string, error) {
 	files := make(map[string]string)
 	for _, record := range strings.Split(string(index), "\x00") {
 		if record == "" {

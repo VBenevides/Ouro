@@ -24,6 +24,7 @@ type QualityOptions struct {
 	RunID          string
 	RunIDReserved  bool
 	Stage          string
+	Items          []string
 	Iteration      int
 	Config         config.Config
 	Runner         process.Runner
@@ -111,6 +112,11 @@ func RunQuality(ctx context.Context, options QualityOptions) (qualityResult Qual
 			return QualityResult{}, err
 		}
 	}
+	plan, err = quality.SelectItems(plan, options.Items)
+	if err != nil {
+		return QualityResult{}, err
+	}
+	selectQualityAnalyzers(&options, plan)
 	detections, err := languages.Detect(options.Root)
 	if err != nil {
 		return QualityResult{}, err
@@ -119,6 +125,7 @@ func RunQuality(ctx context.Context, options QualityOptions) (qualityResult Qual
 	if err != nil {
 		return QualityResult{}, err
 	}
+	selectQualityStageItems(options.Items, plan, stages)
 	coveragePath, err := configureQualityCoverage(options, detections, stages)
 	if err != nil {
 		return QualityResult{}, err
@@ -165,6 +172,39 @@ func RunQuality(ctx context.Context, options QualityOptions) (qualityResult Qual
 		return partial, err
 	}
 	return finishQuality(options, execution, nil)
+}
+
+func selectQualityAnalyzers(options *QualityOptions, plan quality.Plan) {
+	if len(options.Items) == 0 {
+		return
+	}
+	selected := qualityItemSet(plan)
+	options.Config.Quality.CodeQL.Enabled = selected["codeql"]
+	options.Config.Quality.Sonar.Enabled = selected["sonar"]
+}
+
+func qualityItemSet(plan quality.Plan) map[string]bool {
+	selected := map[string]bool{}
+	for _, gate := range plan.Gates {
+		selected[gate.Name] = true
+	}
+	return selected
+}
+
+func selectQualityStageItems(items []string, plan quality.Plan, stages []qualityStageGates) {
+	if len(items) == 0 {
+		return
+	}
+	selected := qualityItemSet(plan)
+	for i := range stages {
+		filtered := make([]gates.Gate, 0)
+		for _, gate := range stages[i].selected {
+			if selected[gate.Name] {
+				filtered = append(filtered, gate)
+			}
+		}
+		stages[i].selected = filtered
+	}
 }
 
 func finalizeQualityReport(options QualityOptions, levels []string, results []gates.Result, qualityResult *QualityResult, runErr error) error {

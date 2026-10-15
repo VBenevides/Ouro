@@ -102,39 +102,18 @@ func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner
 		return finishCodeQL(CodeQLOutcome{Result: base, Stage: "setup", Version: version}), err
 	}
 	if cfg.Incremental {
-		canonicalRoot, resolveErr := resolveCodeQLProjectRoot(root)
-		if resolveErr != nil {
-			overlayDiagnostic(&base, "resolve overlay root: "+resolveErr.Error()+"; using full analysis")
-		} else {
-			overlay, release, overlayErr := prepareCodeQLOverlay(operationContext, canonicalRoot, executable, runner, paths, &base)
-			if overlayErr != nil {
-				overlayDiagnostic(&base, overlayErr.Error())
-			} else {
-				paths.overlay = overlay
-				defer func() {
-					release()
-					outcome.Result.Stderr = base.Stderr
-				}()
-			}
+		overlay, release := prepareOptionalCodeQLOverlay(operationContext, root, executable, runner, paths, &base)
+		if overlay != nil {
+			paths.overlay = overlay
+			defer func() {
+				release()
+				outcome.Result.Stderr = base.Stderr
+			}()
 		}
 	}
-	status, detail, parsedFindings, stage := analyzeCodeQL(operationContext, root, cfg, executable, runner, paths, &base)
-	if paths.overlay != nil && status == Error && !base.OutputTruncated && operationContext.Err() == nil {
-		overlayDiagnostic(&base, "incremental analysis failed: "+detail+"; retrying once with ordinary full analysis")
-		if cleanupErr := removeCodeQLDatabase(root, paths.database); cleanupErr != nil {
-			status, detail, stage = Error, "clean failed overlay: "+cleanupErr.Error(), "cleanup"
-		} else {
-			paths.overlay = nil
-			status, detail, parsedFindings, stage = analyzeCodeQL(operationContext, root, cfg, executable, runner, paths, &base)
-		}
-	}
+	status, detail, parsedFindings, stage := analyzeCodeQLWithFallback(operationContext, root, cfg, executable, runner, &paths, &base)
 	if paths.overlay != nil && stage == "complete" {
-		canonicalRoot, resolveErr := resolveCodeQLProjectRoot(root)
-		if resolveErr != nil {
-			overlayDiagnostic(&base, "cache was not published: "+resolveErr.Error())
-		} else if cacheErr := paths.overlay.publish(operationContext, canonicalRoot, executable, runner, paths, &base); cacheErr != nil {
-			overlayDiagnostic(&base, "cache was not published: "+cacheErr.Error())
-		}
+		publishCodeQLOverlay(operationContext, root, executable, runner, paths, &base)
 	}
 	if cleanupErr := removeCodeQLDatabase(root, paths.database); cleanupErr != nil {
 		status = Error
@@ -143,6 +122,44 @@ func RunCodeQL(ctx context.Context, root string, cfg config.CodeQLConfig, runner
 	}
 	base.Status, base.Detail = status, detail
 	return finishCodeQL(CodeQLOutcome{Result: base, Stage: stage, Version: version, Findings: parsedFindings}), nil
+}
+
+func analyzeCodeQLWithFallback(ctx context.Context, root string, cfg config.CodeQLConfig, executable string, runner process.Runner, paths *codeQLPaths, base *Result) (Status, string, []findings.Finding, string) {
+	status, detail, parsedFindings, stage := analyzeCodeQL(ctx, root, cfg, executable, runner, *paths, base)
+	if paths.overlay == nil || status != Error || base.OutputTruncated || ctx.Err() != nil {
+		return status, detail, parsedFindings, stage
+	}
+	overlayDiagnostic(base, "incremental analysis failed: "+detail+"; retrying once with ordinary full analysis")
+	if err := removeCodeQLDatabase(root, paths.database); err != nil {
+		return Error, "clean failed overlay: " + err.Error(), parsedFindings, "cleanup"
+	}
+	paths.overlay = nil
+	return analyzeCodeQL(ctx, root, cfg, executable, runner, *paths, base)
+}
+
+func prepareOptionalCodeQLOverlay(ctx context.Context, root, executable string, runner process.Runner, paths codeQLPaths, base *Result) (*codeQLOverlay, func()) {
+	canonicalRoot, err := resolveCodeQLProjectRoot(root)
+	if err != nil {
+		overlayDiagnostic(base, "resolve overlay root: "+err.Error()+"; using full analysis")
+		return nil, nil
+	}
+	overlay, release, err := prepareCodeQLOverlay(ctx, canonicalRoot, executable, runner, paths, base)
+	if err != nil {
+		overlayDiagnostic(base, err.Error())
+		return nil, nil
+	}
+	return overlay, release
+}
+
+func publishCodeQLOverlay(ctx context.Context, root, executable string, runner process.Runner, paths codeQLPaths, base *Result) {
+	canonicalRoot, err := resolveCodeQLProjectRoot(root)
+	if err != nil {
+		overlayDiagnostic(base, "cache was not published: "+err.Error())
+		return
+	}
+	if err := paths.overlay.publish(ctx, canonicalRoot, executable, runner, paths, base); err != nil {
+		overlayDiagnostic(base, "cache was not published: "+err.Error())
+	}
 }
 
 func scannerOperationTimeout(configured string, fallback time.Duration) (time.Duration, error) {

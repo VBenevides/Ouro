@@ -29,15 +29,16 @@ type overlayTestRunner struct {
 	creates      int
 }
 
+func overlayTestFailure(err error) process.Result {
+	return process.Result{Status: process.StatusError, ExitCode: 1, Err: err.Error()}
+}
+
 func (runner *overlayTestRunner) Run(ctx context.Context, command process.Command) process.Result {
 	if command.Executable == "git" {
 		return (process.OSRunner{}).Run(ctx, command)
 	}
 	runner.commands = append(runner.commands, command)
 	result := process.Result{Status: process.StatusPass, ExitCode: 0}
-	fail := func(err error) process.Result {
-		return process.Result{Status: process.StatusError, ExitCode: 1, Err: err.Error()}
-	}
 	if command.Executable == "go" || command.Executable == "node" {
 		result.Stdout = []byte("fixture runtime " + command.Executable + runner.toolchain)
 		return result
@@ -54,60 +55,79 @@ func (runner *overlayTestRunner) Run(ctx context.Context, command process.Comman
 	case "database":
 		switch command.Args[1] {
 		case "create":
-			runner.creates++
-			for _, arg := range command.Args {
-				if strings.HasPrefix(arg, "--overlay-changes=") {
-					data, err := os.ReadFile(strings.TrimPrefix(arg, "--overlay-changes="))
-					if err != nil {
-						return fail(err)
-					}
-					var changes struct {
-						Changes []string `json:"changes"`
-					}
-					if err := json.Unmarshal(data, &changes); err != nil {
-						return fail(err)
-					}
-					runner.changes = changes.Changes
-					if runner.failOverlay {
-						return fail(errors.New("incompatible overlay"))
-					}
-					if _, err := os.Stat(filepath.Join(command.Args[2], "marker")); err != nil {
-						return fail(fmt.Errorf("base was not restored: %w", err))
-					}
-				}
-			}
-			if runner.failBase && containsArg(command.Args, "--overlay-base") {
-				return fail(errors.New("base initialization failed"))
-			}
-			if err := os.MkdirAll(command.Args[2], 0o700); err != nil {
-				return fail(err)
-			}
-			if err := os.WriteFile(filepath.Join(command.Args[2], "marker"), []byte(fmt.Sprint(runner.creates)), 0o600); err != nil {
-				return fail(err)
-			}
+			return runner.createDatabase(command)
 		case "analyze":
-			if runner.cancelScan {
-				return process.Result{Status: process.StatusCancelled, ExitCode: -1, Err: "cancelled"}
-			}
-			if runner.mutate != nil {
-				runner.mutate()
-				runner.mutate = nil
-			}
-			if runner.failAnalysis {
-				return fail(errors.New("query evaluation failed"))
-			}
-			for i, arg := range command.Args {
-				if arg == "--output" {
-					// Includes a finding outside the changed file: no diff-only filtering.
-					sarif := `{"version":"2.1.0","runs":[{"results":[{"ruleId":"unsafe","message":{"text":"unchanged finding"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"unchanged.go"},"region":{"startLine":1}}}]}]}]}`
-					if err := os.WriteFile(command.Args[i+1], []byte(sarif), 0o600); err != nil {
-						return fail(err)
-					}
-				}
-			}
+			return runner.analyzeDatabase(command)
 		}
 	}
 	return result
+}
+
+func (runner *overlayTestRunner) readOverlayChanges(command process.Command) error {
+	for _, arg := range command.Args {
+		if !strings.HasPrefix(arg, "--overlay-changes=") {
+			continue
+		}
+		data, err := os.ReadFile(strings.TrimPrefix(arg, "--overlay-changes="))
+		if err != nil {
+			return err
+		}
+		var changes struct {
+			Changes []string `json:"changes"`
+		}
+		if err := json.Unmarshal(data, &changes); err != nil {
+			return err
+		}
+		runner.changes = changes.Changes
+		if runner.failOverlay {
+			return errors.New("incompatible overlay")
+		}
+		if _, err := os.Stat(filepath.Join(command.Args[2], "marker")); err != nil {
+			return fmt.Errorf("base was not restored: %w", err)
+		}
+	}
+	return nil
+}
+
+func (runner *overlayTestRunner) createDatabase(command process.Command) process.Result {
+	runner.creates++
+	if err := runner.readOverlayChanges(command); err != nil {
+		return overlayTestFailure(err)
+	}
+	if runner.failBase && containsArg(command.Args, "--overlay-base") {
+		return overlayTestFailure(errors.New("base initialization failed"))
+	}
+	if err := os.MkdirAll(command.Args[2], 0o700); err != nil {
+		return overlayTestFailure(err)
+	}
+	if err := os.WriteFile(filepath.Join(command.Args[2], "marker"), []byte(fmt.Sprint(runner.creates)), 0o600); err != nil {
+		return overlayTestFailure(err)
+	}
+	return process.Result{Status: process.StatusPass, ExitCode: 0}
+}
+
+func (runner *overlayTestRunner) analyzeDatabase(command process.Command) process.Result {
+	if runner.cancelScan {
+		return process.Result{Status: process.StatusCancelled, ExitCode: -1, Err: "cancelled"}
+	}
+	if runner.mutate != nil {
+		runner.mutate()
+		runner.mutate = nil
+	}
+	if runner.failAnalysis {
+		return overlayTestFailure(errors.New("query evaluation failed"))
+	}
+	for i, arg := range command.Args {
+		if arg != "--output" {
+			continue
+		}
+		// Includes a finding outside the changed file: no diff-only filtering.
+		sarif := `{"version":"2.1.0","runs":[{"results":[{"ruleId":"unsafe","message":{"text":"unchanged finding"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"unchanged.go"},"region":{"startLine":1}}}]}]}]}`
+		if err := os.WriteFile(command.Args[i+1], []byte(sarif), 0o600); err != nil {
+			return overlayTestFailure(err)
+		}
+	}
+	return process.Result{Status: process.StatusPass, ExitCode: 0}
 }
 
 func overlayFixture(t *testing.T) string {
@@ -213,60 +233,114 @@ func TestCodeQLOverlayReusesBaseAndTracksChanges(t *testing.T) {
 func TestCodeQLOverlayUnchangedAndInvalidation(t *testing.T) {
 	for _, change := range []string{"unchanged", "dependency", "version", "packs", "toolchain", "corrupt metadata", "unsafe metadata"} {
 		t.Run(change, func(t *testing.T) {
-			root := overlayFixture(t)
-			runner := &overlayTestRunner{}
-			runOverlayTest(t, root, runner, true)
-			switch change {
-			case "dependency":
-				if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/changed\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				overlayGit(t, root, "add", "go.mod")
-			case "version":
-				runner.version = "CodeQL 2.28.0"
-			case "packs":
-				runner.packs = "new-query-pack"
-			case "toolchain":
-				runner.toolchain = "upgraded runtime"
-			case "unsafe metadata":
-				path := filepath.Join(root, ".ouro/quality/codeql/overlay-cache/base/inputs.json")
-				data, err := os.ReadFile(path)
-				if err != nil {
-					t.Fatal(err)
-				}
-				var metadata codeQLOverlayMetadata
-				if err := json.Unmarshal(data, &metadata); err != nil {
-					t.Fatal(err)
-				}
-				metadata.Files["../outside.go"] = "unsafe"
-				data, err = json.Marshal(metadata)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, data, 0o600); err != nil {
-					t.Fatal(err)
-				}
-			case "corrupt metadata":
-				if err := os.WriteFile(filepath.Join(root, ".ouro/quality/codeql/overlay-cache/base/inputs.json"), []byte("broken"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			}
-			outcome := runOverlayTest(t, root, runner, true)
-			if outcome.Result.Status != Fail {
-				t.Fatalf("scan failed: %+v", outcome)
-			}
-			creates := overlayCreateCommands(runner)
-			if len(creates) != 2 {
-				t.Fatalf("unexpected creations: %+v", creates)
-			}
-			if change == "unchanged" {
-				if len(runner.changes) != 0 || !strings.Contains(outcome.Result.Stderr, "reusing overlay base") {
-					t.Fatalf("unchanged inputs were not reused: %+v", outcome)
-				}
-			} else if !containsArg(creates[1].Args, "--overlay-base") {
-				t.Fatalf("incompatible base reused: %+v", creates[1])
-			}
+			checkOverlayInvalidation(t, change)
 		})
+	}
+}
+
+func checkOverlayInvalidation(t *testing.T, change string) {
+	t.Helper()
+	root := overlayFixture(t)
+	runner := &overlayTestRunner{}
+	runOverlayTest(t, root, runner, true)
+	changeOverlayFixture(t, root, runner, change)
+	outcome := runOverlayTest(t, root, runner, true)
+	if outcome.Result.Status != Fail {
+		t.Fatalf("scan failed: %+v", outcome)
+	}
+	creates := overlayCreateCommands(runner)
+	if len(creates) != 2 {
+		t.Fatalf("unexpected creations: %+v", creates)
+	}
+	if change != "unchanged" {
+		if !containsArg(creates[1].Args, "--overlay-base") {
+			t.Fatalf("incompatible base reused: %+v", creates[1])
+		}
+		return
+	}
+	if len(runner.changes) != 0 || !strings.Contains(outcome.Result.Stderr, "reusing overlay base") {
+		t.Fatalf("unchanged inputs were not reused: %+v", outcome)
+	}
+}
+
+func changeOverlayFixture(t *testing.T, root string, runner *overlayTestRunner, change string) {
+	t.Helper()
+	switch change {
+	case "dependency":
+		if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module example.com/changed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		overlayGit(t, root, "add", "go.mod")
+	case "version":
+		runner.version = "CodeQL 2.28.0"
+	case "packs":
+		runner.packs = "new-query-pack"
+	case "toolchain":
+		runner.toolchain = "upgraded runtime"
+	case "unsafe metadata":
+		writeUnsafeOverlayMetadata(t, root)
+	case "corrupt metadata":
+		if err := os.WriteFile(filepath.Join(root, ".ouro/quality/codeql/overlay-cache/base/inputs.json"), []byte("broken"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func writeUnsafeOverlayMetadata(t *testing.T, root string) {
+	t.Helper()
+	path := filepath.Join(root, ".ouro/quality/codeql/overlay-cache/base/inputs.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata codeQLOverlayMetadata
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		t.Fatal(err)
+	}
+	metadata.Files["../outside.go"] = "unsafe"
+	data, err = json.Marshal(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func prepareOverlayFallbackFixture(t *testing.T, root string, runner *overlayTestRunner, scenario string) {
+	t.Helper()
+	switch scenario {
+	case "unstaged", "untracked", "ignored":
+		name := "main.go"
+		if scenario != "unstaged" {
+			name = "untracked.go"
+		}
+		if scenario == "ignored" {
+			if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("untracked.go\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			overlayGit(t, root, "add", ".gitignore")
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte("package changed\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	case "assume unchanged":
+		overlayGit(t, root, "update-index", "--assume-unchanged", "main.go")
+	case "skip worktree":
+		overlayGit(t, root, "update-index", "--skip-worktree", "main.go")
+	case "old CLI":
+		runner.version = "CodeQL 2.24.1"
+	case "busy cache":
+		if err := os.MkdirAll(filepath.Join(root, ".ouro/quality/codeql/overlay-cache/lock"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	case "symlink cache":
+		if err := os.MkdirAll(filepath.Join(root, ".ouro/quality/codeql"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(t.TempDir(), filepath.Join(root, ".ouro/quality/codeql/overlay-cache")); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -275,39 +349,7 @@ func TestCodeQLOverlaySafeFallback(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			root := overlayFixture(t)
 			runner := &overlayTestRunner{}
-			switch scenario {
-			case "unstaged", "untracked", "ignored":
-				name := "main.go"
-				if scenario != "unstaged" {
-					name = "untracked.go"
-				}
-				if scenario == "ignored" {
-					if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("untracked.go\n"), 0o600); err != nil {
-						t.Fatal(err)
-					}
-					overlayGit(t, root, "add", ".gitignore")
-				}
-				if err := os.WriteFile(filepath.Join(root, name), []byte("package changed\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-			case "assume unchanged":
-				overlayGit(t, root, "update-index", "--assume-unchanged", "main.go")
-			case "skip worktree":
-				overlayGit(t, root, "update-index", "--skip-worktree", "main.go")
-			case "old CLI":
-				runner.version = "CodeQL 2.24.1"
-			case "busy cache":
-				if err := os.MkdirAll(filepath.Join(root, ".ouro/quality/codeql/overlay-cache/lock"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			case "symlink cache":
-				if err := os.MkdirAll(filepath.Join(root, ".ouro/quality/codeql"), 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Symlink(t.TempDir(), filepath.Join(root, ".ouro/quality/codeql/overlay-cache")); err != nil {
-					t.Fatal(err)
-				}
-			}
+			prepareOverlayFallbackFixture(t, root, runner, scenario)
 			outcome := runOverlayTest(t, root, runner, scenario != "disabled")
 			creates := overlayCreateCommands(runner)
 			if outcome.Result.Status != Fail || len(creates) != 1 || containsArg(creates[0].Args, "--overlay-base") || !containsArg(creates[0].Args, "--overwrite") {

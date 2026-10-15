@@ -14,63 +14,78 @@ import (
 func TestSonarSettingsPrecedenceAndIdentity(t *testing.T) {
 	for _, nested := range []bool{false, true} {
 		t.Run(map[bool]string{false: "root", true: "nested"}[nested], func(t *testing.T) {
-			root := t.TempDir()
-			path := filepath.Join(root, "sonar-project.properties")
-			if nested {
-				if err := os.WriteFile(path, []byte("sonar.projectKey=wrong-root\n"), 0o600); err != nil {
-					t.Fatal(err)
-				}
-				path = filepath.Join(root, ".ouro", "quality", "sonarqube", "sonar-project.properties")
-				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-					t.Fatal(err)
-				}
-			}
-			contents := "sonar.projectKey=custom\\u002d\\\n key\nsonar.organization=custom-org\nsonar.sources=src\nsonar.tests=test\nsonar.test.inclusions=**/*.test.ts\nsonar.exclusions=vendor/**\nsonar.coverage.exclusions=generated/**\nsonar.go.coverage.reportPaths=reports/go.out\nsonar.javascript.lcov.reportPaths=reports/lcov.info\nsonar.qualitygate.wait=true\n"
-			if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			runner := &sonarBranchRunner{branch: "main"}
-			client := sonarHTTPClient(func(request *http.Request) (*http.Response, error) {
-				query := request.URL.Query()
-				for _, field := range []string{"component", "componentKeys", "projectKey"} {
-					if value := query.Get(field); value != "" && value != "custom-key" {
-						t.Fatalf("wrong project identity in API: %s", request.URL)
-					}
-				}
-				switch request.URL.Path {
-				case "/api/ce/task":
-					return sonarResponse(`{"task":{"status":"SUCCESS","analysisId":"analysis-1"}}`), nil
-				case "/api/qualitygates/project_status":
-					return sonarResponse(`{"projectStatus":{"status":"OK","conditions":[]}}`), nil
-				case "/api/measures/component":
-					return sonarResponse(`{"component":{"measures":[{"metric":"coverage","value":"80"}]}}`), nil
-				case "/api/issues/search", "/api/hotspots/search":
-					return sonarResponse(`{"issues":[],"paging":{"total":0}}`), nil
-				default:
-					t.Fatalf("unexpected API %s", request.URL)
-					return nil, nil
-				}
-			})
-			outcome, err := RunSonar(context.Background(), root, config.SonarConfig{Enabled: true, Mode: "managed-local", URL: "http://localhost:9000", ProjectKey: "wrong-config", Organization: "wrong-org", GoCoveragePath: filepath.Join(root, "missing-fallback.out")}, runner, client)
-			if err != nil || outcome.Result.Status != Pass || outcome.Report.ProjectKey != "custom-key" || outcome.Report.Organization != "custom-org" {
-				t.Fatalf("identity/coverage precedence failed: %+v %v", outcome, err)
-			}
-			command := runner.commands[1]
-			if command.Dir != root || !containsArg(command.Args, "-Dproject.settings="+path) || !containsArg(command.Args, "-Dsonar.qualitygate.wait=false") {
-				t.Fatalf("settings path/base/wait incorrect: %+v", command)
-			}
-			for _, arg := range command.Args {
-				for _, key := range []string{"sonar.sources", "sonar.tests", "sonar.test.inclusions", "sonar.exclusions", "sonar.coverage.exclusions", "sonar.go.coverage.reportPaths", "sonar.javascript.lcov.reportPaths"} {
-					if strings.HasPrefix(arg, "-D"+key+"=") {
-						t.Fatalf("file value overridden: %s", arg)
-					}
-				}
-			}
-			after, err := os.ReadFile(path)
-			if err != nil || string(after) != contents {
-				t.Fatalf("user settings modified: %v", err)
-			}
+			checkSonarSettingsPrecedence(t, nested)
 		})
+	}
+}
+
+func sonarSettingsIdentityResponse(t *testing.T, request *http.Request) (*http.Response, error) {
+	t.Helper()
+	query := request.URL.Query()
+	for _, field := range []string{"component", "componentKeys", "projectKey"} {
+		if value := query.Get(field); value != "" && value != "custom-key" {
+			t.Fatalf("wrong project identity in API: %s", request.URL)
+		}
+	}
+	switch request.URL.Path {
+	case "/api/ce/task":
+		return sonarResponse(`{"task":{"status":"SUCCESS","analysisId":"analysis-1"}}`), nil
+	case "/api/qualitygates/project_status":
+		return sonarResponse(`{"projectStatus":{"status":"OK","conditions":[]}}`), nil
+	case "/api/measures/component":
+		return sonarResponse(`{"component":{"measures":[{"metric":"coverage","value":"80"}]}}`), nil
+	case "/api/issues/search", "/api/hotspots/search":
+		return sonarResponse(`{"issues":[],"paging":{"total":0}}`), nil
+	default:
+		t.Fatalf("unexpected API %s", request.URL)
+		return nil, nil
+	}
+}
+
+func assertSonarFileValuesPreserved(t *testing.T, args []string) {
+	t.Helper()
+	for _, arg := range args {
+		for _, key := range []string{"sonar.sources", "sonar.tests", "sonar.test.inclusions", "sonar.exclusions", "sonar.coverage.exclusions", "sonar.go.coverage.reportPaths", "sonar.javascript.lcov.reportPaths"} {
+			if strings.HasPrefix(arg, "-D"+key+"=") {
+				t.Fatalf("file value overridden: %s", arg)
+			}
+		}
+	}
+}
+
+func checkSonarSettingsPrecedence(t *testing.T, nested bool) {
+	t.Helper()
+	root := t.TempDir()
+	path := filepath.Join(root, "sonar-project.properties")
+	if nested {
+		if err := os.WriteFile(path, []byte("sonar.projectKey=wrong-root\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		path = filepath.Join(root, ".ouro", "quality", "sonarqube", "sonar-project.properties")
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	contents := "sonar.projectKey=custom\\u002d\\\n key\nsonar.organization=custom-org\nsonar.sources=src\nsonar.tests=test\nsonar.test.inclusions=**/*.test.ts\nsonar.exclusions=vendor/**\nsonar.coverage.exclusions=generated/**\nsonar.go.coverage.reportPaths=reports/go.out\nsonar.javascript.lcov.reportPaths=reports/lcov.info\nsonar.qualitygate.wait=true\n"
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &sonarBranchRunner{branch: "main"}
+	client := sonarHTTPClient(func(request *http.Request) (*http.Response, error) {
+		return sonarSettingsIdentityResponse(t, request)
+	})
+	outcome, err := RunSonar(context.Background(), root, config.SonarConfig{Enabled: true, Mode: "managed-local", URL: "http://localhost:9000", ProjectKey: "wrong-config", Organization: "wrong-org", GoCoveragePath: filepath.Join(root, "missing-fallback.out")}, runner, client)
+	if err != nil || outcome.Result.Status != Pass || outcome.Report.ProjectKey != "custom-key" || outcome.Report.Organization != "custom-org" {
+		t.Fatalf("identity/coverage precedence failed: %+v %v", outcome, err)
+	}
+	command := runner.commands[1]
+	if command.Dir != root || !containsArg(command.Args, "-Dproject.settings="+path) || !containsArg(command.Args, "-Dsonar.qualitygate.wait=false") {
+		t.Fatalf("settings path/base/wait incorrect: %+v", command)
+	}
+	assertSonarFileValuesPreserved(t, command.Args)
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != contents {
+		t.Fatalf("user settings modified: %v", err)
 	}
 }
 

@@ -128,27 +128,7 @@ func (e Executor) run(ctx context.Context, root string, gate Gate, declaredOutpu
 	if runner == nil {
 		runner = process.OSRunner{}
 	}
-	workRoot := root
-	if e.WorkRoot != "" {
-		workRoot = e.WorkRoot
-	}
-	dir := gate.Dir
-	if relative, err := filepath.Rel(root, dir); dir != "" && err == nil && isWithinPath(relative) {
-		dir = filepath.Join(workRoot, relative)
-	}
-	if dir == "" {
-		dir = workRoot
-		if gate.ComponentRoot != "" && gate.ComponentRoot != "." {
-			if filepath.IsAbs(gate.ComponentRoot) {
-				dir = gate.ComponentRoot
-				if relative, err := filepath.Rel(root, dir); err == nil && isWithinPath(relative) {
-					dir = filepath.Join(workRoot, relative)
-				}
-			} else {
-				dir = filepath.Join(workRoot, gate.ComponentRoot)
-			}
-		}
-	}
+	dir := gateWorkingDirectory(root, e.WorkRoot, gate)
 	if gate.Timeout <= 0 {
 		gate.Timeout = (config.QualityConfig{}).TimeoutForLevel(gate.Level)
 	}
@@ -164,6 +144,30 @@ func (e Executor) run(ctx context.Context, root string, gate Gate, declaredOutpu
 		result.Status, result.Detail, result.Fresh = Error, "gate output was truncated", false
 	}
 	return finish()
+}
+
+func gateWorkingDirectory(root, workRoot string, gate Gate) string {
+	if workRoot == "" {
+		workRoot = root
+	}
+	dir := gate.Dir
+	if relative, err := filepath.Rel(root, dir); dir != "" && err == nil && isWithinPath(relative) {
+		dir = filepath.Join(workRoot, relative)
+	}
+	if dir != "" {
+		return dir
+	}
+	if gate.ComponentRoot == "" || gate.ComponentRoot == "." {
+		return workRoot
+	}
+	if !filepath.IsAbs(gate.ComponentRoot) {
+		return filepath.Join(workRoot, gate.ComponentRoot)
+	}
+	dir = gate.ComponentRoot
+	if relative, err := filepath.Rel(root, dir); err == nil && isWithinPath(relative) {
+		dir = filepath.Join(workRoot, relative)
+	}
+	return dir
 }
 
 func validateGateExecution(gate Gate) string {
