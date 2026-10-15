@@ -51,29 +51,30 @@ type Gate struct {
 }
 
 type Result struct {
-	Name            string    `json:"name"`
-	Level           string    `json:"level"`
-	Category        string    `json:"category"`
-	Status          Status    `json:"status"`
-	Required        bool      `json:"required"`
-	Detail          string    `json:"detail,omitempty"`
-	Command         []string  `json:"command,omitempty"`
-	StartedAt       time.Time `json:"started_at"`
-	FinishedAt      time.Time `json:"finished_at"`
-	InputHash       string    `json:"input_hash"`
-	ProjectSnapshot string    `json:"project_snapshot"`
-	Tool            string    `json:"tool,omitempty"`
-	ToolVersion     string    `json:"tool_version,omitempty"`
-	Language        string    `json:"language,omitempty"`
-	Profile         string    `json:"profile,omitempty"`
-	ProfileVersion  string    `json:"profile_version,omitempty"`
-	ComponentRoot   string    `json:"component_root,omitempty"`
-	Stdout          string    `json:"stdout,omitempty"`
-	Stderr          string    `json:"stderr,omitempty"`
-	ExitCode        int       `json:"exit_code"`
-	OutputTruncated bool      `json:"output_truncated"`
-	Fresh           bool      `json:"fresh"`
-	Stale           bool      `json:"-"`
+	Name            string      `json:"name"`
+	Level           string      `json:"level"`
+	Category        string      `json:"category"`
+	Status          Status      `json:"status"`
+	Required        bool        `json:"required"`
+	Detail          string      `json:"detail,omitempty"`
+	Command         []string    `json:"command,omitempty"`
+	StartedAt       time.Time   `json:"started_at"`
+	FinishedAt      time.Time   `json:"finished_at"`
+	InputHash       string      `json:"input_hash"`
+	ProjectSnapshot string      `json:"project_snapshot"`
+	Tool            string      `json:"tool,omitempty"`
+	ToolVersion     string      `json:"tool_version,omitempty"`
+	Language        string      `json:"language,omitempty"`
+	Profile         string      `json:"profile,omitempty"`
+	ProfileVersion  string      `json:"profile_version,omitempty"`
+	ComponentRoot   string      `json:"component_root,omitempty"`
+	Stdout          string      `json:"stdout,omitempty"`
+	Stderr          string      `json:"stderr,omitempty"`
+	ExitCode        int         `json:"exit_code"`
+	OutputTruncated bool        `json:"output_truncated"`
+	OutputLogs      []OutputLog `json:"output_logs,omitempty"`
+	Fresh           bool        `json:"fresh"`
+	Stale           bool        `json:"-"`
 }
 
 type Executor struct {
@@ -82,6 +83,8 @@ type Executor struct {
 	// WorkRoot is a filtered copy of root. Gates execute there, while snapshots
 	// and identities still describe root.
 	WorkRoot string
+	// LogDir is a run-scoped directory under root/.ouro/runs.
+	LogDir string
 }
 
 func (e Executor) Run(ctx context.Context, root string, gates []Gate, parallel bool, declaredOutputs ...string) []Result {
@@ -112,6 +115,16 @@ func (e Executor) run(ctx context.Context, root string, gate Gate, declaredOutpu
 		result.Status, result.Detail, result.Fresh = Error, err, false
 		return finish()
 	}
+	sourceDir := gateWorkingDirectory(root, "", gate)
+	local, err := process.LocalNodeTool(root, sourceDir, gate.Command[0])
+	if err != nil {
+		result.Status, result.Detail = Error, "resolve local tool: "+err.Error()
+		return finish()
+	}
+	if local != "" {
+		gate.Command = append([]string(nil), gate.Command...)
+		gate.Command[0] = local
+	}
 	projectSnapshot, err := snapshotHash(root, declaredOutputs...)
 	if err != nil {
 		result.Status, result.Detail = Error, "quality input snapshot failed: "+err.Error()
@@ -133,6 +146,12 @@ func (e Executor) run(ctx context.Context, root string, gate Gate, declaredOutpu
 		gate.Timeout = (config.QualityConfig{}).TimeoutForLevel(gate.Level)
 	}
 	command := process.Command{Executable: gate.Command[0], Args: gate.Command[1:], Label: "gate " + gate.Name, Dir: dir, Environment: gateEnvironment(gate.Environment), ClearEnv: true, Timeout: gate.Timeout, Progress: e.Progress}
+	if local != "" && e.WorkRoot != "" {
+		relative, _ := filepath.Rel(root, local)
+		command.Executable = filepath.Join(e.WorkRoot, relative)
+	}
+	result.Command = append([]string{command.Executable}, command.Args...)
+	outputs, logErr := openGateLogs(e.LogDir, root, gate, &command)
 	processResult := runner.Run(ctx, command)
 	result.ExitCode = processResult.ExitCode
 	result.Stdout = redactGateOutput(string(processResult.Stdout), gate)
@@ -140,9 +159,7 @@ func (e Executor) run(ctx context.Context, root string, gate Gate, declaredOutpu
 	result.OutputTruncated = processResult.StdoutTruncated || processResult.StderrTruncated
 	result.Detail = redactGateOutput(processResult.Err, gate)
 	result.Status, result.Detail = classifyGateResult(processResult, gate)
-	if result.OutputTruncated {
-		result.Status, result.Detail, result.Fresh = Error, "gate output was truncated", false
-	}
+	finishGateLogs(outputs, processResult, &result, logErr)
 	return finish()
 }
 
@@ -217,6 +234,16 @@ func AnyRequiredFailure(results []Result) bool {
 func EffectiveInputHash(root string, gate Gate, projectSnapshot string) (string, error) {
 	if strings.TrimSpace(projectSnapshot) == "" {
 		return "", errors.New("project snapshot hash is required")
+	}
+	if len(gate.Command) > 0 {
+		local, err := process.LocalNodeTool(root, gateWorkingDirectory(root, "", gate), gate.Command[0])
+		if err != nil {
+			return "", err
+		}
+		if local != "" {
+			gate.Command = append([]string(nil), gate.Command...)
+			gate.Command[0] = local
+		}
 	}
 	type input struct {
 		ProjectSnapshot string            `json:"project_snapshot"`

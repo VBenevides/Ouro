@@ -2,6 +2,21 @@
 
 All notable changes to Ouro are documented here.
 
+## [0.1.3] - 2026-10-15
+
+### Bugfixes
+
+- Prefer component-local Node executables during prerequisite checks and gate execution, searching ancestor installations within the repository before falling back to global tools. Preserve explicitly configured executable paths and do not retry failing local tools globally; report ESLint and TypeScript global fallback reasons.
+- Preserve installed Node package resolution in isolated quality workspaces by privately copying applicable `node_modules` installations. Keep dependency files outside quality-input snapshots and synchronization, and reject dependency links that leave their installation.
+- Retain late gate failure diagnostics in redacted, per-stream log artifacts under each run directory, with artifact references in structured results and log paths in reports. Keep bounded previews of both the output prefix and tail instead of discarding the tail.
+- Report log completeness, byte counts, omitted bytes, and storage limits separately from preview truncation. Limit durable output to 32 MiB per stream and omit lines exceeding the 1 MiB redaction limit; surface incomplete evidence or persistence failures without losing the original process exit code.
+- Preserve existing output-truncation flags when serializing quality receipts.
+
+### Other
+
+- Add regressions for component-local tool precedence, global fallback, broken local installations, isolated ESM imports, and prevention of dependency edits reaching the checkout.
+- Add regressions for failure diagnostics beyond the 4 MiB capture limit, artifact hashes and private log permissions, split-write secret redaction, storage limits, and log creation/write failures.
+
 ## [0.1.2] - 2026-10-14
 
 ### Features

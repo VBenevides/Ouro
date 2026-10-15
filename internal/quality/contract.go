@@ -236,11 +236,25 @@ type Finding struct {
 }
 
 type Artifact struct {
-	ID        string `json:"id"`
-	Kind      string `json:"kind"`
-	Path      string `json:"path"`
-	SHA256    string `json:"sha256"`
-	MediaType string `json:"media_type"`
+	ID        string      `json:"id"`
+	Kind      string      `json:"kind"`
+	Path      string      `json:"path"`
+	SHA256    string      `json:"sha256"`
+	MediaType string      `json:"media_type"`
+	Capture   *LogCapture `json:"capture,omitempty"`
+}
+
+// LogCapture distinguishes redacted durable evidence from bounded previews.
+type LogCapture struct {
+	Stream              string `json:"stream"`
+	BytesSeen           int64  `json:"bytes_seen"`
+	BytesWritten        int64  `json:"bytes_written"`
+	OmittedBytes        int64  `json:"omitted_bytes"`
+	LimitBytes          int    `json:"limit_bytes"`
+	LineLimitBytes      int    `json:"line_limit_bytes"`
+	PreviewOmittedBytes int64  `json:"preview_omitted_bytes"`
+	Complete            bool   `json:"complete"`
+	Redacted            bool   `json:"redacted"`
 }
 
 type Diagnostic struct {
@@ -629,6 +643,11 @@ func validateRunArtifacts(values []Artifact) (map[string]bool, error) {
 	for _, artifact := range values {
 		if !validDigest(artifact.ID) || strings.TrimSpace(artifact.Kind) == "" || !safeRelativePath(artifact.Path, false) || !validDigest(artifact.SHA256) || strings.TrimSpace(artifact.MediaType) == "" {
 			return nil, errors.New("quality result contains an invalid artifact")
+		}
+		if capture := artifact.Capture; capture != nil {
+			if (capture.Stream != "stdout" && capture.Stream != "stderr") || capture.BytesSeen < 0 || capture.BytesWritten < 0 || capture.OmittedBytes < 0 || capture.PreviewOmittedBytes < 0 || capture.LimitBytes <= 0 || capture.LineLimitBytes <= 0 || capture.BytesWritten > int64(capture.LimitBytes) || !capture.Redacted || (capture.Complete && capture.OmittedBytes != 0) {
+				return nil, errors.New("quality result contains invalid output capture metadata")
+			}
 		}
 		if artifacts[artifact.ID] {
 			return nil, errors.New("quality result contains duplicate artifact IDs")
