@@ -142,6 +142,16 @@ per-run report paths, the aggregate `result`, and an actionable `summary`.
 Detailed gate output and analyzer reports stay in that run folder. Do not infer
 the current result from a mutable shared report.
 
+Artifact writers use these locations:
+
+- Quality history (`internal/quality/history.go`) stores results and summaries under `.ouro/runs/<run-id>/`.
+- Workflow gate execution (`internal/workflow/quality.go`) uses run-scoped log paths.
+- Scanner integrations keep shared state under `.ouro/quality/`.
+- Agent shell commands control their own redirections. CLI storage rules cannot constrain those commands.
+
+Loose files from earlier sessions do not identify their writer. Check command
+history before assigning ownership or moving files.
+
 `PASS` and `PASS_WITH_WARNINGS` exit 0. `FAIL`, `BLOCKED`, `NOT_CONFIGURED`,
 `STALE`, `ERROR`, and `CANCELLED` exit 1. Advisory failures remain visible as
 warnings and are not clean passes.
