@@ -162,6 +162,15 @@ Preserve existing reusable tool environments, including `python-quality/`.
 Do not write Ouro artifacts to the repository root, `.agent-work/`, or `/tmp`.
 Do not move or delete existing artifacts without explicit approval.
 
+Use `run_path`, `result_path`, and report paths from the CLI JSON response.
+Read existing reports instead of saving duplicate CLI output.
+For follow-up commands, create `logs/`, `diagnostics/`, or `scratch/` inside
+that returned `run_path`. Use unique filenames and preserve existing run files.
+Do not redirect or pipe command output to `.ouro/<name>.json` or `.ouro/<name>.log`.
+If no run exists yet, keep command output in the session until the CLI returns
+a run path. If a command fails, report its exit status and the diagnostic path.
+Do not hide a failure with an output pipeline.
+
 If `.ouro/config.yaml` is absent, initialize the target project first:
 
 ```sh
