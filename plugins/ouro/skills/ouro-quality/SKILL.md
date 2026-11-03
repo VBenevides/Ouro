@@ -153,10 +153,14 @@ install the source repository as a runtime fallback.
 
 ## Artifact boundary
 
-All Ouro artifacts MUST remain under the target repository's `.ouro/` directory.
-Quality runs are stored in `.ouro/runs/<run-id>-.../`. Do not write quality
-reports, summaries, diagnostics, or temporary Ouro files to the repository
-root, `.agent-work/`, `/tmp`, or another location.
+Keep all Ouro artifacts under the target repository's `.ouro/` directory.
+Store run-specific reports, summaries, logs, diagnostics, and build scratch files
+under the corresponding `.ouro/runs/<run-id>/` directory.
+Never create loose files directly under `.ouro/`, except the managed `config.yaml`.
+Preserve documented shared scanner state and caches under `.ouro/quality/`.
+Preserve existing reusable tool environments, including `python-quality/`.
+Do not write Ouro artifacts to the repository root, `.agent-work/`, or `/tmp`.
+Do not move or delete existing artifacts without explicit approval.
 
 If `.ouro/config.yaml` is absent, initialize the target project first:
 

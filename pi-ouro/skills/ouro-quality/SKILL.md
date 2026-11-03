@@ -159,10 +159,14 @@ Do not overwrite an invalid existing configuration. Report the error and stop.
 
 ## Artifact boundary
 
-All Ouro artifacts MUST remain under `.ouro/`. Each quality execution creates
-an immutable `.ouro/runs/<run-id>-.../` folder containing that run's result,
-summary, and reports. Do not write Ouro artifacts to `.agent-work/`, `/tmp`, or
-the repository root.
+Keep all Ouro artifacts under the target repository's `.ouro/` directory.
+Store run-specific reports, summaries, logs, diagnostics, and build scratch files
+under the corresponding `.ouro/runs/<run-id>/` directory.
+Never create loose files directly under `.ouro/`, except the managed `config.yaml`.
+Preserve documented shared scanner state and caches under `.ouro/quality/`.
+Preserve existing reusable tool environments, including `python-quality/`.
+Do not write Ouro artifacts to the repository root, `.agent-work/`, or `/tmp`.
+Do not move or delete existing artifacts without explicit approval.
 
 ## Run and consume quality
 
