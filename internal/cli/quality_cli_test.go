@@ -106,3 +106,85 @@ func TestQualityRunsReturnDistinctRunFolders(t *testing.T) {
 		t.Fatalf("second result missing: %v", err)
 	}
 }
+
+// This checks CLI-owned output, not arbitrary agent shell redirections.
+func TestQualityArtifactBoundary(t *testing.T) {
+	root := t.TempDir()
+	if err := config.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	cfg, configPath, err := config.LoadFromRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := filepath.Join(root, ".ouro", "quality", "cache", "sentinel")
+	if err := os.MkdirAll(filepath.Dir(shared), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(shared, []byte("shared state"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var previous quality.CommandResult
+	var previousResult []byte
+	for _, step := range []struct {
+		name     string
+		command  string
+		wantCode int
+	}{
+		{"success", "true", 0},
+		{"failure", "false", 1},
+		{"repeat", "true", 0},
+	} {
+		t.Run(step.name, func(t *testing.T) {
+			cfg.Quality.Fast.Commands = []config.GateConfig{{Name: "boundary-check", Command: []string{step.command}}}
+			if err := config.Write(configPath, cfg); err != nil {
+				t.Fatal(err)
+			}
+			var output, errors bytes.Buffer
+			if code := Run([]string{"quality", "--root", root, "--stage", "fast", "--json"}, &output, &errors); code != step.wantCode {
+				t.Fatalf("exit code %d, want %d: %s", code, step.wantCode, errors.String())
+			}
+			var result quality.CommandResult
+			if err := json.Unmarshal(output.Bytes(), &result); err != nil {
+				t.Fatalf("invalid command result: %v: %s", err, output.String())
+			}
+			for _, path := range []string{result.ResultPath, result.QualityReportPath, result.MarkdownReportPath} {
+				relative, err := filepath.Rel(result.RunPath, path)
+				if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+					t.Fatalf("artifact outside run: %q", path)
+				}
+				if _, err := os.Stat(path); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if previous.RunID != "" {
+				if previous.RunPath == result.RunPath {
+					t.Fatal("run directory reused")
+				}
+				data, err := os.ReadFile(previous.ResultPath)
+				if err != nil || !bytes.Equal(data, previousResult) {
+					t.Fatalf("previous result changed: %v", err)
+				}
+			}
+			previous = result
+			previousResult, err = os.ReadFile(result.ResultPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			entries, err := os.ReadDir(filepath.Join(root, ".ouro"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, entry := range entries {
+				switch entry.Name() {
+				case "config.yaml", "runs", "quality":
+				default:
+					t.Errorf("unexpected top-level artifact: %s", entry.Name())
+				}
+			}
+			if data, err := os.ReadFile(shared); err != nil || string(data) != "shared state" {
+				t.Fatalf("shared state changed: %q, %v", data, err)
+			}
+		})
+	}
+}
