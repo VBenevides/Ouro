@@ -231,20 +231,43 @@ func AnyRequiredFailure(results []Result) bool {
 	return false
 }
 
+// resolveLocalCommand swaps in a component-local Node tool when one exists, without mutating gate.
+func resolveLocalCommand(root string, gate Gate) ([]string, error) {
+	if len(gate.Command) == 0 {
+		return gate.Command, nil
+	}
+	local, err := process.LocalNodeTool(root, gateWorkingDirectory(root, "", gate), gate.Command[0])
+	if err != nil || local == "" {
+		return gate.Command, err
+	}
+	command := append([]string(nil), gate.Command...)
+	command[0] = local
+	return command, nil
+}
+
+// fingerprintSensitive copies values, replacing those whose key names a secret with a fingerprint.
+func fingerprintSensitive(values map[string]string) map[string]string {
+	result := make(map[string]string, len(values))
+	for key, value := range values {
+		lower := strings.ToLower(key)
+		if strings.Contains(lower, "secret") || strings.Contains(lower, "token") || strings.Contains(lower, "password") {
+			result[key] = fingerprint(value)
+		} else {
+			result[key] = value
+		}
+	}
+	return result
+}
+
 func EffectiveInputHash(root string, gate Gate, projectSnapshot string) (string, error) {
 	if strings.TrimSpace(projectSnapshot) == "" {
 		return "", errors.New("project snapshot hash is required")
 	}
-	if len(gate.Command) > 0 {
-		local, err := process.LocalNodeTool(root, gateWorkingDirectory(root, "", gate), gate.Command[0])
-		if err != nil {
-			return "", err
-		}
-		if local != "" {
-			gate.Command = append([]string(nil), gate.Command...)
-			gate.Command[0] = local
-		}
+	command, err := resolveLocalCommand(root, gate)
+	if err != nil {
+		return "", err
 	}
+	gate.Command = command
 	type input struct {
 		ProjectSnapshot string            `json:"project_snapshot"`
 		Name            string            `json:"name"`
@@ -264,22 +287,8 @@ func EffectiveInputHash(root string, gate Gate, projectSnapshot string) (string,
 		ComponentRoot   string            `json:"component_root"`
 		ToolIdentity    string            `json:"tool_identity"`
 	}
-	declared := map[string]string{}
-	for key, value := range gate.DeclaredInputs {
-		if strings.Contains(strings.ToLower(key), "secret") || strings.Contains(strings.ToLower(key), "token") || strings.Contains(strings.ToLower(key), "password") {
-			declared[key] = fingerprint(value)
-		} else {
-			declared[key] = value
-		}
-	}
-	env := map[string]string{}
-	for key, value := range gate.Environment {
-		if strings.Contains(strings.ToLower(key), "secret") || strings.Contains(strings.ToLower(key), "token") || strings.Contains(strings.ToLower(key), "password") {
-			env[key] = fingerprint(value)
-		} else {
-			env[key] = value
-		}
-	}
+	declared := fingerprintSensitive(gate.DeclaredInputs)
+	env := fingerprintSensitive(gate.Environment)
 	timeout := gate.Timeout
 	if timeout <= 0 {
 		timeout = (config.QualityConfig{}).TimeoutForLevel(gate.Level)

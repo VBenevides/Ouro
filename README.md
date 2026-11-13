@@ -13,6 +13,23 @@ go run ./cmd/ouro version
 go run ./cmd/ouro quality --plan
 ```
 
+Install the latest `main` (needs git, go, and make):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/VBenevides/Ouro/main/install.sh | sh
+```
+
+`OURO_REF` selects another branch or tag and `OURO_INSTALL_DIR` changes the
+destination (default `~/.local/bin`). `ouro update` reads `VERSION` on `main`;
+when it is newer than the running version, it builds `main` with git and go and
+replaces the running executable. Bump `VERSION` to publish an update.
+`ouro update --check` only reports.
+
+From a checkout, use `make install`. It builds `dist/ouro` and copies it to
+`$(PREFIX)/bin` (default `~/.local/bin`); override with `make install PREFIX=/usr/local`.
+`make uninstall` removes it. `ouro skill` prints the embedded `ouro-quality`
+SKILL.md, for example `ouro skill > ~/.claude/skills/ouro-quality/SKILL.md`.
+
 Build Linux and Windows amd64 executables with `./build.sh`; outputs go to
 `dist/` by default.
 

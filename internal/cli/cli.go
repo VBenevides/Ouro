@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -22,10 +23,11 @@ import (
 	"github.com/VBenevides/Ouro/internal/languages"
 	"github.com/VBenevides/Ouro/internal/process"
 	qualityplan "github.com/VBenevides/Ouro/internal/quality"
+	"github.com/VBenevides/Ouro/internal/update"
 	"github.com/VBenevides/Ouro/internal/workflow"
 )
 
-var commands = []string{"help", "version", "init", "doctor", "quality", "setup", "tools", "services"}
+var commands = []string{"help", "version", "init", "doctor", "quality", "setup", "tools", "services", "skill", "update"}
 
 var sonarProjectEnsurer = gates.EnsureSonarProject
 
@@ -43,9 +45,11 @@ type helpEntry struct {
 var helpEntries = map[string]helpEntry{
 	"help":     {"show command descriptions and detailed usage", "ouro help [command]", "command  optional command name for detailed help"},
 	"version":  {"print the embedded Ouro version", "ouro version", "none"},
-	"init":     {"initialize or refresh Ouro quality metadata in an existing project", "ouro init [--force] [--level LEVEL] [--root PATH]", "--root PATH      project root (default: current directory)\n--force          refresh existing configuration and detected integrations\n--level LEVEL    fast, deep, or strict; auto-selects deep when CodeQL or SonarQube is available"},
+	"init":     {"initialize or refresh Ouro quality metadata in an existing project", "ouro init [--force] [--level LEVEL] [--root PATH]", "--root PATH      project root (default: current directory)\n--force          refresh existing configuration and detected integrations\n--level LEVEL    fast, deep, or strict; defaults to fast"},
 	"doctor":   {"check configuration, language coverage, Git, tools, and quality preflight", "ouro doctor [--root PATH] [--json]", "--root PATH  project root\n--json       write machine-readable diagnostics and a quality plan"},
-	"quality":  {"run configured quality gates or inspect readiness", "ouro quality [--root PATH] [--stage STAGE] [--item [NAME]] [--run-id ID] [--plan] [--json]", "--root PATH   project root (default: current directory)\n--stage STAGE  fast, deep (fast + deep), or strict (fast + deep + strict); defaults to quality.profile or deep\n--item [NAME] exact configured gate name; repeatable or comma-separated; omit NAME to list all project items without execution\n--run-id ID    durable quality run ID; generated when omitted\n--plan         report gate discovery and local readiness without running gates\n--json         write the item list, plan, or completed run result as JSON"},
+	"quality":  {"run configured quality gates or inspect readiness", "ouro quality [--root PATH] [--stage STAGE] [--item [NAME]] [--run-id ID] [--plan] [--json]", "--root PATH   project root (default: current directory)\n--stage STAGE  fast, deep (fast + deep), or strict (fast + deep + strict); defaults to quality.profile or fast\n--item [NAME] exact configured gate name; repeatable or comma-separated; omit NAME to list all project items without execution\n--run-id ID    durable quality run ID; generated when omitted\n--plan         report gate discovery and local readiness without running gates\n--json         write the item list, plan, or completed run result as JSON"},
+	"skill":    {"print the embedded ouro-quality SKILL.md", "ouro skill", "none"},
+	"update":   {"update Ouro from the main branch on GitHub (needs git and go)", "ouro update [--check]", "--check  report whether main has a newer VERSION without installing it"},
 	"setup":    {"run explicit tool provisioning guidance or a supplied setup executable", "ouro setup [--root PATH] --tool NAME [--executable PATH] [--arg ARG]...", "--root PATH       project root (default: current directory)\n--tool NAME       tool to provision\n--executable PATH explicit setup executable\n--arg ARG         executable argument; repeatable"},
 	"tools":    {"check whether external tools are available", "ouro tools [NAME...]", "NAME  optional tool names; defaults to common Ouro tools"},
 	"services": {"check or explicitly control an external service", "ouro services [--url URL] [--action ACTION] [--executable PATH] [--arg ARG]...", "--url URL          service URL for status checks\n--action ACTION    status, start, or stop\n--executable PATH explicit service lifecycle executable\n--arg ARG          executable argument; repeatable"},
@@ -70,6 +74,11 @@ func Run(args []string, out, errOut io.Writer) int {
 	switch args[0] {
 	case "version":
 		_, _ = fmt.Fprintln(out, ouro.Version())
+		return 0
+	case "update":
+		return runUpdate(args[1:], out, errOut)
+	case "skill":
+		_, _ = fmt.Fprint(out, ouro.Skill())
 		return 0
 	case "init":
 		return runInit(args[1:], out, errOut)
@@ -734,4 +743,55 @@ func projectRoot() string {
 		return root
 	}
 	return "."
+}
+
+// Tests replace these to avoid network access and replacing the running binary.
+var (
+	newUpdateClient   = func() update.Client { return update.Client{} }
+	currentExecutable = os.Executable
+)
+
+func runUpdate(args []string, out, errOut io.Writer) int {
+	flags := flag.NewFlagSet("update", flag.ContinueOnError)
+	flags.SetOutput(errOut)
+	check := flags.Bool("check", false, "report whether a newer release exists without installing it")
+	if err := flags.Parse(args); err != nil {
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	client := newUpdateClient()
+	if *check {
+		result, err := client.Check(ctx, ouro.Version())
+		if err != nil {
+			_, _ = fmt.Fprintf(errOut, "ouro update: %v\n", err)
+			return 1
+		}
+		printUpdateStatus(out, result)
+		return 0
+	}
+	executable, err := currentExecutable()
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "ouro update: locate executable: %v\n", err)
+		return 1
+	}
+	result, err := client.Apply(ctx, ouro.Version(), executable)
+	if err != nil {
+		_, _ = fmt.Fprintf(errOut, "ouro update: %v\n", err)
+		return 1
+	}
+	if result.Updated {
+		_, _ = fmt.Fprintf(out, "Updated ouro %s -> %s at %s\n", result.Current, result.Latest, result.Path)
+		return 0
+	}
+	printUpdateStatus(out, result)
+	return 0
+}
+
+func printUpdateStatus(out io.Writer, result update.Result) {
+	if result.Available {
+		_, _ = fmt.Fprintf(out, "Update available: %s -> %s. Run `ouro update`.\n", result.Current, result.Latest)
+		return
+	}
+	_, _ = fmt.Fprintf(out, "ouro %s is up to date.\n", result.Current)
 }

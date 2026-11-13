@@ -1,7 +1,6 @@
 package git
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,20 +8,6 @@ import (
 
 	"github.com/VBenevides/Ouro/internal/process"
 )
-
-type fakeRunner struct {
-	results map[string]process.Result
-	calls   []process.Command
-}
-
-func (f *fakeRunner) Run(_ context.Context, command process.Command) process.Result {
-	f.calls = append(f.calls, command)
-	key := strings.Join(append([]string{command.Executable}, command.Args...), " ")
-	if result, ok := f.results[key]; ok {
-		return result
-	}
-	return process.Result{Status: process.StatusError, ExitCode: -1, Err: "unexpected command: " + key}
-}
 
 func TestQualitySnapshotIncludesConfigAndIgnoresArtifacts(t *testing.T) {
 	root := t.TempDir()

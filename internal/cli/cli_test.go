@@ -871,3 +871,13 @@ func TestSetupRunsOnlyExplicitProvisionCommand(t *testing.T) {
 		t.Fatalf("setup exit code %d: %s", code, errOut.String())
 	}
 }
+
+func TestSkillCommandPrintsEmbeddedSkill(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"skill"}, &out, &errOut); code != 0 {
+		t.Fatalf("skill exited %d: %s", code, errOut.String())
+	}
+	if !strings.HasPrefix(out.String(), "---\nname: ouro-quality\n") {
+		t.Fatalf("unexpected skill output: %.80q", out.String())
+	}
+}
