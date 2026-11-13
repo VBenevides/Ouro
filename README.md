@@ -7,31 +7,70 @@ runs configured checks, stores immutable per-run evidence, and returns a
 versioned result for the active agent or CI process. Ouro does not launch
 models, providers, agent sessions, or nested harnesses.
 
-```sh
-go run ./cmd/ouro --help
-go run ./cmd/ouro version
-go run ./cmd/ouro quality --plan
-```
+## Requirements
 
-Install the latest `main` (needs git, go, and make):
+- Git, and an existing Git repository to check.
+- Go, to install or update Ouro from source. The version in `go.mod` is the minimum.
+- `make`, only for `make install`.
+- Optional analyzers: `golangci-lint`, `govulncheck`, CodeQL, and SonarQube.
+  Ouro never installs them during a quality run.
+
+## Install
+
+Install the latest `main` branch:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/VBenevides/Ouro/main/install.sh | sh
 ```
 
-`OURO_REF` selects another branch or tag and `OURO_INSTALL_DIR` changes the
-destination (default `~/.local/bin`). `ouro update` reads `VERSION` on `main`;
-when it is newer than the running version, it builds `main` with git and go and
-replaces the running executable. Bump `VERSION` to publish an update.
-`ouro update --check` only reports.
+The script clones the repository, builds `ouro` with Go, and copies it to
+`~/.local/bin/ouro`. It warns when another `ouro` comes first on `PATH`.
 
-From a checkout, use `make install`. It builds `dist/ouro` and copies it to
-`$(PREFIX)/bin` (default `~/.local/bin`); override with `make install PREFIX=/usr/local`.
-`make uninstall` removes it. `ouro skill` prints the embedded `ouro-quality`
-SKILL.md, for example `ouro skill > ~/.claude/skills/ouro-quality/SKILL.md`.
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `OURO_REF` | `main` | Branch or tag to build. |
+| `OURO_INSTALL_DIR` | `~/.local/bin` | Directory for the `ouro` executable. |
+| `OURO_REPO` | `https://github.com/VBenevides/Ouro` | Repository to clone. |
 
-Build Linux and Windows amd64 executables with `./build.sh`; outputs go to
+To install from a checkout, run `make install`. It builds `dist/ouro` and copies it
+to `$(PREFIX)/bin`. The default `PREFIX` is `~/.local`. Use
+`make install PREFIX=/usr/local` to change it. `make uninstall` removes the file.
+
+To build Linux and Windows amd64 executables, run `./build.sh`. The outputs go to
 `dist/` by default.
+
+Verify the installation:
+
+```sh
+ouro version
+ouro quality --plan
+```
+
+## Update
+
+```sh
+ouro update --check   # report only
+ouro update           # build main and replace the running executable
+```
+
+`ouro update` reads `VERSION` on the `main` branch. If that version is newer than the
+running version, Ouro clones `main`, builds it with Go, and replaces the executable.
+If the build fails, the old executable stays in place. The directory of the
+executable must be writable. Ouro does not verify a checksum, so it trusts the
+content of `main`. A release is published when someone raises `VERSION` on `main`.
+
+## Install the agent skill
+
+`ouro skill` prints the embedded `ouro-quality` SKILL.md. Save it in the skills
+directory of your agent host:
+
+```sh
+mkdir -p ~/.claude/skills/ouro-quality
+ouro skill > ~/.claude/skills/ouro-quality/SKILL.md
+```
+
+Other hosts use a different directory, such as `~/.omp/agent/skills/` or
+`~/.codex/skills/`. See [Skills](#skills).
 
 ## Initialize and inspect
 
@@ -41,7 +80,8 @@ go run ./cmd/ouro doctor
 ```
 
 `ouro init` detects language components and external tools. It selects the `fast`
-quality profile by default, even when CodeQL or SonarQube is available. Use `ouro init --level fast|deep|strict` to choose explicitly. It enables
+quality profile by default, even when CodeQL or SonarQube is available. Use
+`ouro init --level fast|deep|strict` to choose explicitly. It enables
 CodeQL when `codeql` is installed and SonarQube when `SONAR_HOST_URL` and
 `SONAR_TOKEN` are available. Use `ouro init --force` to refresh an existing
 configuration after these inputs change. Quality configuration is stored in
@@ -195,9 +235,9 @@ A completed analysis can still fail its quality gate on coverage or findings.
 
 ## Using Ouro from an agent
 
-Ouro ships no host extensions or plugins. An agent uses it through a skill from
-`skills/` (see [Skills](#skills)) and the compiled executable. Distribute them
-separately:
+Ouro ships no host extensions or plugins. An agent uses it through the
+`ouro-quality` skill (see [Skills](#skills)) and the compiled executable. If
+`ouro` is not on `PATH`, set `OURO_BIN`:
 
 ```sh
 export OURO_BIN=/opt/ouro/bin/ouro
@@ -215,11 +255,11 @@ if [ -n "${OURO_BIN:-}" ]; then test -x "$OURO_BIN"; else command -v ouro; fi
 
 ## Skills
 
-`skills/ouro-quality/SKILL.md` is the single skill for every agent host. It sets
-`disable-model-invocation: true`, so the user must invoke it explicitly. Copy the
-`ouro-quality/` folder to the host's skills directory, for example
-`~/.claude/skills/`, `~/.omp/agent/skills/`, or `~/.codex/skills/`. Hosts that do
-not support that field ignore it.
+`skills/ouro-quality/SKILL.md` is the single skill for every agent host. The
+binary embeds it, so `ouro skill` always matches the installed version. The skill
+sets `disable-model-invocation: true`, so the user must invoke it explicitly.
+Hosts that do not support that field ignore it. After you edit the file, rebuild
+`ouro` to update the embedded copy.
 
 ## Development checks
 
