@@ -335,13 +335,13 @@ func configureQualityCoverage(options QualityOptions, detections []languages.Det
 		return "", nil
 	}
 	path := qualityCoveragePath(options.Root, options.RunID, options.Iteration)
-	if err := verifyProcedurePath(options.Root, filepath.Dir(path)); err != nil {
+	if err := verifyRunPath(options.Root, filepath.Dir(path)); err != nil {
 		return "", fmt.Errorf("create Go coverage directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("create Go coverage directory: %w", err)
 	}
-	if err := verifyProcedurePath(options.Root, filepath.Dir(path)); err != nil {
+	if err := verifyRunPath(options.Root, filepath.Dir(path)); err != nil {
 		return "", fmt.Errorf("create Go coverage directory: %w", err)
 	}
 	for stageIndex := range stages {
@@ -544,6 +544,7 @@ func runSonarQuality(ctx context.Context, options QualityOptions, runner process
 	} else {
 		sonarConfig.GoCoveragePath = ""
 	}
+	sonarConfig.RunOutputDir = filepath.Join(".ouro", "runs", options.RunID, "analyzers", "sonarqube")
 	outcome, runErr := gates.RunSonar(ctx, options.Root, sonarConfig, runner, nil, qualityDeclaredOutputs(execution.plan)...)
 	if runErr != nil {
 		if outcome.Result.Name == "" {
@@ -617,7 +618,7 @@ func finishQuality(options QualityOptions, execution qualityExecution, runErr er
 		}
 		return result, err
 	}
-	receipt := Receipt{Version: ReceiptVersion, RunID: options.RunID, Step: options.Stage + "_gates", State: StateName(options.Stage + "_gates"), Iteration: options.Iteration, Status: status, Result: status, InputHashes: inputHashes, Gates: sanitizeQualityReceiptGates(results), StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC()}
+	receipt := Receipt{Version: ReceiptVersion, RunID: options.RunID, Step: options.Stage + "_gates", State: options.Stage + "_gates", Iteration: options.Iteration, Status: status, Result: status, InputHashes: inputHashes, Gates: sanitizeQualityReceiptGates(results), StartedAt: time.Now().UTC(), FinishedAt: time.Now().UTC()}
 	dir, err := RevisionDir(options.Root, options.RunID, max(options.Iteration, 1))
 	if err != nil {
 		if persistErr := markQualityResultError(options, &result, "receipt-path", err); persistErr != nil {
@@ -626,7 +627,7 @@ func finishQuality(options QualityOptions, execution qualityExecution, runErr er
 		return result, err
 	}
 	path := filepath.Join(dir, options.Stage+"-gates.json")
-	if err := WriteReceipt(path, receipt); err != nil {
+	if err := WriteReceipt(options.Root, path, receipt); err != nil {
 		if persistErr := markQualityResultError(options, &result, "receipt-write", err); persistErr != nil {
 			return result, persistErr
 		}

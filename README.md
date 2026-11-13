@@ -1,6 +1,6 @@
 # Ouro
 
-Release version: **0.1.2**. `VERSION` is embedded in the executable at build time.
+Release version: **0.1.4**. `VERSION` is embedded in the executable at build time.
 
 Ouro is a deterministic quality-gate runner for an existing Git repository. It
 runs configured checks, stores immutable per-run evidence, and returns a
@@ -23,9 +23,8 @@ go run ./cmd/ouro init
 go run ./cmd/ouro doctor
 ```
 
-`ouro init` detects language components and external tools. It selects the `deep`
-quality profile when CodeQL or SonarQube is available; otherwise it selects
-`fast`. Use `ouro init --level fast|deep|strict` to choose explicitly. It enables
+`ouro init` detects language components and external tools. It selects the `fast`
+quality profile by default, even when CodeQL or SonarQube is available. Use `ouro init --level fast|deep|strict` to choose explicitly. It enables
 CodeQL when `codeql` is installed and SonarQube when `SONAR_HOST_URL` and
 `SONAR_TOKEN` are available. Use `ouro init --force` to refresh an existing
 configuration after these inputs change. Quality configuration is stored in
@@ -128,7 +127,7 @@ and [CodeQL command reference](https://docs.github.com/en/code-security/referenc
 ## Run quality
 
 `fast`, `deep`, and `strict` are cumulative profiles. Without `--stage`, Ouro
-uses `quality.profile` or `deep`:
+uses `quality.profile` or `fast`:
 
 ```sh
 go run ./cmd/ouro quality --root "$PWD" --json
@@ -177,29 +176,18 @@ and Elasticsearch logs. A flood-stage disk watermark makes indices read-only;
 free space below the high watermark and verify the blocks clear before rerunning.
 A completed analysis can still fail its quality gate on coverage or findings.
 
-## Codex and Pi packages
+## Using Ouro from an agent
 
-The repository ships a Codex plugin and an installable Pi package. Distribute
-the compiled executable and package artifacts separately:
+Ouro ships no host extensions or plugins. An agent uses it through a skill from
+`skills/` (see [Skills](#skills)) and the compiled executable. Distribute them
+separately:
 
 ```sh
 export OURO_BIN=/opt/ouro/bin/ouro
-pi install /path/to/pi-ouro
 ```
 
-The host packages run the same structured `ouro quality --json` command. The
-active Codex or Pi session remains the agent and owns source edits, tools,
-permissions, and commits. The quality-only packages do not provide lifecycle
-workflow hooks, stage guards, approval controls, or nested-agent commands.
-
-For oh-my-pi, install the skill separately because `pi install` does not
-populate oh-my-pi's skill directory:
-
-```sh
-mkdir -p ~/.omp/agent/skills/ouro-quality
-cp /path/to/pi-ouro/skills/ouro-quality/SKILL.md \
-  ~/.omp/agent/skills/ouro-quality/SKILL.md
-```
+The skill runs the structured `ouro quality --json` command. The active agent
+remains the agent and owns source edits, tools, permissions, and commits.
 
 Verify the executable before use:
 
@@ -207,6 +195,14 @@ Verify the executable before use:
 if [ -n "${OURO_BIN:-}" ]; then test -x "$OURO_BIN"; else command -v ouro; fi
 "${OURO_BIN:-ouro}" version
 ```
+
+## Skills
+
+`skills/ouro-quality/SKILL.md` is the single skill for every agent host. It sets
+`disable-model-invocation: true`, so the user must invoke it explicitly. Copy the
+`ouro-quality/` folder to the host's skills directory, for example
+`~/.claude/skills/`, `~/.omp/agent/skills/`, or `~/.codex/skills/`. Hosts that do
+not support that field ignore it.
 
 ## Development checks
 

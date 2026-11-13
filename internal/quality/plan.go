@@ -21,7 +21,7 @@ import (
 )
 
 const (
-	defaultQualityProfile = "deep"
+	defaultQualityProfile = "fast"
 	genericProfileVersion = "1"
 	probeTimeout          = 2 * time.Second
 	probeOutputLimit      = 4096
@@ -623,7 +623,7 @@ func (state *plannerState) addSonar(plan *Plan, cfg config.SonarConfig) error {
 		RequirementSource: RequirementAnalyzerConfig,
 		EnvironmentNames:  []string{},
 		Tool:              ToolIdentity{Name: "sonar-scanner"},
-		SideEffects:       SideEffects{ProjectControlled: true, DeclaredOutputs: []string{".ouro/quality/sonarqube/scanner"}},
+		SideEffects:       SideEffects{ProjectControlled: true, DeclaredOutputs: []string{".ouro/runs/<run-id>/analyzers/sonarqube/scanner"}},
 		NextSteps:         []Action{},
 	}
 	executable := nonEmpty(cfg.Executable, "sonar-scanner")

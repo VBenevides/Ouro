@@ -269,13 +269,13 @@ func writeQualityReportsAt(canonical, jsonPath, markdownPath string, report Qual
 }
 
 func writeQualityReportFile(root, path string, data []byte, immutable bool) error {
-	if err := verifyProcedurePath(root, path); err != nil {
+	if err := verifyRunPath(root, path); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("create quality report directory: %w", err)
 	}
-	if err := verifyProcedurePath(root, path); err != nil {
+	if err := verifyRunPath(root, path); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".quality-report-*.tmp")

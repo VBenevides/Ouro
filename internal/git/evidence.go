@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/VBenevides/Ouro/internal/findings"
 	"github.com/VBenevides/Ouro/internal/process"
@@ -39,35 +38,6 @@ type Snapshot struct {
 	Files   int
 	Bytes   int64
 	Entries map[string]string `json:"-"`
-}
-
-type Evidence struct {
-	Root          string    `json:"root"`
-	Head          string    `json:"head,omitempty"`
-	Status        string    `json:"status"`
-	IndexStatus   string    `json:"index_status,omitempty"`
-	Diff          string    `json:"diff,omitempty"`
-	DiffHash      string    `json:"diff_hash"`
-	SnapshotHash  string    `json:"snapshot_hash"`
-	SnapshotFiles int       `json:"snapshot_files"`
-	SnapshotBytes int64     `json:"snapshot_bytes"`
-	CapturedAt    time.Time `json:"captured_at"`
-}
-
-type Mutation struct {
-	Changed bool
-	Reasons []string
-}
-
-type CommitResult struct {
-	Hash string
-	Diff string
-}
-
-type CommitInfo struct {
-	Hash    string
-	Parent  string
-	Subject string
 }
 
 func CurrentBranch(ctx context.Context, root string, runner process.Runner) string {
@@ -132,258 +102,6 @@ func Discover(ctx context.Context, root string, runner process.Runner) (Reposito
 		return Repository{}, fmt.Errorf("repository root: %w", err)
 	}
 	return Repository{Root: repoRoot, Runner: runner}, nil
-}
-
-func (r Repository) Capture(ctx context.Context) (Evidence, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if r.Runner == nil {
-		r.Runner = process.OSRunner{}
-	}
-	if r.Root == "" {
-		return Evidence{}, fmt.Errorf("repository root is required")
-	}
-	headResult := r.Runner.Run(ctx, process.Command{
-		Executable: "git",
-		Args:       []string{gitRevParse, "HEAD"},
-		Dir:        r.Root,
-		Label:      "git HEAD",
-	})
-	head := ""
-	if headResult.Passed() {
-		head = strings.TrimSpace(string(headResult.Stdout))
-	}
-	statusResult := r.Runner.Run(ctx, process.Command{
-		Executable: "git",
-		Args:       []string{"status", "--short", "--untracked-files=all"},
-		Dir:        r.Root,
-		Label:      "git status",
-	})
-	if !statusResult.Passed() {
-		return Evidence{}, fmt.Errorf("capture Git status: %s", processSummary(statusResult))
-	}
-	if statusResult.StdoutTruncated || statusResult.StderrTruncated {
-		return Evidence{}, fmt.Errorf("capture Git status: output truncated")
-	}
-	indexResult := r.Runner.Run(ctx, process.Command{
-		Executable: "git",
-		Args:       []string{"diff", gitCached, "--name-status", "--", "."},
-		Dir:        r.Root,
-		Label:      "git index",
-	})
-	if !indexResult.Passed() {
-		return Evidence{}, fmt.Errorf("capture Git index: %s", processSummary(indexResult))
-	}
-	if indexResult.StdoutTruncated || indexResult.StderrTruncated {
-		return Evidence{}, fmt.Errorf("capture Git index: output truncated")
-	}
-	diffArgs := []string{"diff", gitNoExtDiff, gitNoTextconv, gitBinary}
-	if head != "" {
-		diffArgs = append(diffArgs, "HEAD")
-	}
-	diffArgs = append(diffArgs, "--", ".", gitExcludeOuro)
-	diffResult := r.Runner.Run(ctx, process.Command{
-		Executable: "git",
-		Args:       diffArgs,
-		Dir:        r.Root,
-		Label:      "git diff",
-	})
-	if !diffResult.Passed() {
-		return Evidence{}, fmt.Errorf("capture Git diff: %s", processSummary(diffResult))
-	}
-	if diffResult.StdoutTruncated || diffResult.StderrTruncated {
-		return Evidence{}, fmt.Errorf("capture Git diff: output truncated")
-	}
-	snapshot, err := SnapshotTree(r.Root)
-	if err != nil {
-		return Evidence{}, err
-	}
-	diffHash := sha256.Sum256(diffResult.Stdout)
-	return Evidence{
-		Root:          r.Root,
-		Head:          head,
-		Status:        normalizeStatus(string(statusResult.Stdout)),
-		IndexStatus:   strings.TrimSpace(string(indexResult.Stdout)),
-		Diff:          string(diffResult.Stdout),
-		DiffHash:      hex.EncodeToString(diffHash[:]),
-		SnapshotHash:  snapshot.Hash,
-		SnapshotFiles: snapshot.Files,
-		SnapshotBytes: snapshot.Bytes,
-		CapturedAt:    time.Now().UTC(),
-	}, nil
-}
-
-func (r Repository) Commit(ctx context.Context, message string) (CommitResult, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if r.Runner == nil {
-		r.Runner = process.OSRunner{}
-	}
-	if strings.TrimSpace(r.Root) == "" {
-		return CommitResult{}, fmt.Errorf("repository root is required")
-	}
-	if strings.TrimSpace(message) == "" {
-		return CommitResult{}, fmt.Errorf("commit message is required")
-	}
-	if err := r.validateIndex(ctx); err != nil {
-		return CommitResult{}, err
-	}
-	add := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"add", "-A", "--", ".", gitExcludeOuro}, Dir: r.Root, Label: "git add"})
-	if !add.Passed() {
-		return CommitResult{}, fmt.Errorf("stage implementation: %s", processSummary(add))
-	}
-	diff := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"diff", gitCached, gitNoExtDiff, gitNoTextconv, gitBinary, "--", ".", gitExcludeOuro}, Dir: r.Root, Label: "git staged diff"})
-	if !diff.Passed() {
-		return CommitResult{}, fmt.Errorf("capture staged implementation: %s", processSummary(diff))
-	}
-	if diff.StdoutTruncated || diff.StderrTruncated {
-		return CommitResult{}, fmt.Errorf("capture staged implementation: output truncated")
-	}
-	if strings.TrimSpace(string(diff.Stdout)) == "" {
-		return CommitResult{}, fmt.Errorf("implementation has no staged changes")
-	}
-	hash, err := r.commitStaged(ctx, message)
-	if err != nil {
-		return CommitResult{}, err
-	}
-	committedDiff, err := r.CommitDiff(ctx, hash)
-	if err != nil {
-		return CommitResult{}, err
-	}
-	return CommitResult{Hash: hash, Diff: committedDiff}, nil
-}
-
-func (r Repository) validateIndex(ctx context.Context) error {
-	index := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"diff", gitCached, "--name-only", "--", "."}, Dir: r.Root, Label: "git index"})
-	if !index.Passed() {
-		return fmt.Errorf("inspect Git index: %s", processSummary(index))
-	}
-	if index.StdoutTruncated || index.StderrTruncated {
-		return fmt.Errorf("inspect Git index: output truncated")
-	}
-	for _, path := range strings.Split(strings.TrimSpace(string(index.Stdout)), "\n") {
-		path = strings.Trim(path, "\"")
-		if path == ".ouro" || strings.HasPrefix(path, ouroPathPrefix) {
-			return fmt.Errorf("git index contains protected metadata: %s", path)
-		}
-	}
-	return nil
-}
-
-func (r Repository) commitStaged(ctx context.Context, message string) (string, error) {
-	commit := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"commit", "-m", message}, Dir: r.Root, Label: "git commit"})
-	if !commit.Passed() {
-		return "", fmt.Errorf("commit implementation: %s", processSummary(commit))
-	}
-	head := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{gitRevParse, "HEAD"}, Dir: r.Root, Label: "git rev-parse"})
-	if !head.Passed() {
-		return "", fmt.Errorf("read implementation commit: %s", processSummary(head))
-	}
-	hash := strings.TrimSpace(string(head.Stdout))
-	if hash == "" {
-		return "", fmt.Errorf("implementation commit hash is empty")
-	}
-	return hash, nil
-}
-
-func (r Repository) HeadCommit(ctx context.Context) (CommitInfo, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if r.Runner == nil {
-		r.Runner = process.OSRunner{}
-	}
-	result := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"show", "-s", "--format=%H%x00%P%x00%s", "HEAD"}, Dir: r.Root, Label: "git inspect HEAD"})
-	if !result.Passed() {
-		return CommitInfo{}, fmt.Errorf("inspect HEAD: %s", processSummary(result))
-	}
-	parts := strings.SplitN(strings.TrimSpace(string(result.Stdout)), "\x00", 3)
-	if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" {
-		return CommitInfo{}, fmt.Errorf("git HEAD metadata is incomplete")
-	}
-	return CommitInfo{Hash: strings.TrimSpace(parts[0]), Parent: strings.TrimSpace(parts[1]), Subject: strings.TrimSpace(parts[2])}, nil
-}
-
-func (r Repository) CommitDiff(ctx context.Context, hash string) (string, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if r.Runner == nil {
-		r.Runner = process.OSRunner{}
-	}
-	if strings.TrimSpace(hash) == "" {
-		return "", fmt.Errorf("commit hash is required")
-	}
-	paths := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"diff-tree", "--root", "--no-commit-id", "--name-only", "-r", hash, "--", "."}, Dir: r.Root, Label: "git commit paths"})
-	if !paths.Passed() {
-		return "", fmt.Errorf("read implementation commit paths: %s", processSummary(paths))
-	}
-	if paths.StdoutTruncated || paths.StderrTruncated {
-		return "", fmt.Errorf("read implementation commit paths: output truncated")
-	}
-	for _, path := range strings.Split(strings.TrimSpace(string(paths.Stdout)), "\n") {
-		path = strings.Trim(path, "\"")
-		if path == ".ouro" || strings.HasPrefix(path, ouroPathPrefix) {
-			return "", fmt.Errorf("implementation commit contains protected metadata: %s", path)
-		}
-	}
-	result := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"show", "--format=", gitNoExtDiff, gitNoTextconv, gitBinary, hash, "--", ".", gitExcludeOuro}, Dir: r.Root, Label: "git show implementation"})
-	if !result.Passed() {
-		return "", fmt.Errorf("read implementation commit: %s", processSummary(result))
-	}
-	if result.StdoutTruncated || result.StderrTruncated {
-		return "", fmt.Errorf("read implementation commit: output truncated")
-	}
-	if strings.TrimSpace(string(result.Stdout)) == "" {
-		return "", fmt.Errorf("implementation commit has no diff")
-	}
-	return string(result.Stdout), nil
-}
-
-func (r Repository) IsAncestor(ctx context.Context, ancestor, descendant string) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if r.Runner == nil {
-		r.Runner = process.OSRunner{}
-	}
-	if strings.TrimSpace(ancestor) == "" || strings.TrimSpace(descendant) == "" {
-		return fmt.Errorf("commit ancestry requires two hashes")
-	}
-	result := r.Runner.Run(ctx, process.Command{Executable: "git", Args: []string{"merge-base", "--is-ancestor", ancestor, descendant}, Dir: r.Root, Label: "git commit ancestry"})
-	if !result.Passed() {
-		return fmt.Errorf("verify implementation commit ancestry: %s", processSummary(result))
-	}
-	return nil
-}
-
-func Compare(before, after Evidence) Mutation {
-	reasons := make([]string, 0, 4)
-	if before.Head != after.Head {
-		reasons = append(reasons, "HEAD changed")
-	}
-	if before.Root != after.Root {
-		reasons = append(reasons, "repository root changed")
-	}
-	if before.Status != after.Status {
-		reasons = append(reasons, "Git status changed")
-	}
-	if before.IndexStatus != after.IndexStatus {
-		reasons = append(reasons, "Git index changed")
-	}
-	if before.DiffHash != after.DiffHash {
-		reasons = append(reasons, "Git diff changed")
-	}
-	if before.SnapshotHash != after.SnapshotHash {
-		reasons = append(reasons, "project snapshot changed")
-	}
-	return Mutation{Changed: len(reasons) > 0, Reasons: reasons}
-}
-
-func SnapshotTree(root string) (Snapshot, error) {
-	return snapshotTree(root, excluded)
 }
 
 func SnapshotQualityInputs(root string, declaredOutputs ...string) (Snapshot, error) {
@@ -609,16 +327,6 @@ func (w *snapshotWalker) addFile(path, rel string, size int64, entryHash hash.Ha
 	return nil
 }
 
-func excluded(path string) bool {
-	first := path
-	if index := strings.IndexByte(path, '/'); index >= 0 {
-		first = path[:index]
-	}
-	// Harness metadata and generated build output are not worktree inputs;
-	// hashing them would make tool-owned files look like project mutations.
-	return first == ".ouro" || first == ".git" || first == "dist" || first == ".agent-work" || first == ".ruff_cache" || first == "__pycache__" || first == ".pytest_cache" || first == ".mypy_cache"
-}
-
 func excludedQualityInput(path string) bool {
 	first := path
 	if index := strings.IndexByte(path, '/'); index >= 0 {
@@ -634,28 +342,6 @@ func excludedQualityInput(path string) bool {
 		}
 	}
 	return first == ".ouro" && path != ".ouro" && path != ".ouro/config.yaml"
-}
-
-func normalizeStatus(status string) string {
-	var kept []string
-	for _, line := range strings.Split(status, "\n") {
-		if line == "" {
-			continue
-		}
-		path := line
-		if len(line) >= 3 {
-			path = line[3:]
-		}
-		path = strings.Trim(path, "\"")
-		if path == ".ouro" || strings.HasPrefix(path, ouroPathPrefix) {
-			continue
-		}
-		kept = append(kept, line)
-	}
-	if len(kept) == 0 {
-		return ""
-	}
-	return strings.Join(kept, "\n") + "\n"
 }
 
 func writeString(hash io.Writer, value string) {
