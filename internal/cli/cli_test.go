@@ -468,8 +468,8 @@ func TestConfigureInitAddsFastLanguagesAndDetectedQualityTools(t *testing.T) {
 		sonarHost:     "https://sonar.example/",
 		sonarTokenSet: true,
 	}, false, "")
-	if configured.Quality.Profile != "deep" || configured.Languages["go"].Level != "deep" || configured.Languages["typescript"].Level != "deep" {
-		t.Fatalf("deep resources did not select the deep profile: %+v", configured)
+	if configured.Quality.Profile != "fast" || configured.Languages["go"].Level != "fast" || configured.Languages["typescript"].Level != "fast" {
+		t.Fatalf("init did not default to the fast profile: %+v", configured)
 	}
 	if !configured.Quality.CodeQL.Enabled || configured.Quality.CodeQL.Language != "go,javascript" || configured.Quality.CodeQL.DatabasePath != ".ouro/quality/codeql/database" || configured.Quality.CodeQL.SARIFPath != ".ouro/quality/codeql/results.sarif" {
 		t.Fatalf("CodeQL was not initialized: %+v", configured.Quality.CodeQL)
@@ -869,5 +869,15 @@ func TestSetupRunsOnlyExplicitProvisionCommand(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := Run([]string{"setup", "--root", dir, "--tool", "test", "--executable", "true"}, &out, &errOut); code != 0 {
 		t.Fatalf("setup exit code %d: %s", code, errOut.String())
+	}
+}
+
+func TestSkillCommandPrintsEmbeddedSkill(t *testing.T) {
+	var out, errOut bytes.Buffer
+	if code := Run([]string{"skill"}, &out, &errOut); code != 0 {
+		t.Fatalf("skill exited %d: %s", code, errOut.String())
+	}
+	if !strings.HasPrefix(out.String(), "---\nname: ouro-quality\n") {
+		t.Fatalf("unexpected skill output: %.80q", out.String())
 	}
 }

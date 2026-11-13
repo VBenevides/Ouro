@@ -1,6 +1,6 @@
 ---
 name: ouro-quality
-description: Run and remediate the Ouro quality gate in the current Pi or oh-my-pi session.
+description: Run and remediate the Ouro quality gate in the current agent session.
 disable-model-invocation: true
 ---
 
@@ -134,7 +134,7 @@ Do not change thresholds, exclusions, or gate policy merely to obtain a pass.
 Ouro automatically loads this file; no separate scanner invocation is needed.
 It takes precedence over a repository-root `sonar-project.properties`; the
 files are not merged. Relative paths are relative to the repository root.
-Scanner scratch data is kept separately in `.ouro/quality/sonarqube/scanner/`.
+Scanner scratch data is kept separately in `.ouro/runs/<run-id>/analyzers/sonarqube/scanner/`.
 
 Keep server and credential settings in `.ouro/config.yaml` and the configured
 token environment, not in the properties file. Ouro owns scanner working
@@ -159,10 +159,23 @@ Do not overwrite an invalid existing configuration. Report the error and stop.
 
 ## Artifact boundary
 
-All Ouro artifacts MUST remain under `.ouro/`. Each quality execution creates
-an immutable `.ouro/runs/<run-id>-.../` folder containing that run's result,
-summary, and reports. Do not write Ouro artifacts to `.agent-work/`, `/tmp`, or
-the repository root.
+Keep all Ouro artifacts under the target repository's `.ouro/` directory.
+Store run-specific reports, summaries, logs, diagnostics, and build scratch files
+under the corresponding `.ouro/runs/<run-id>/` directory.
+Never create loose files directly under `.ouro/`, except the managed `config.yaml`.
+Preserve documented shared scanner state and caches under `.ouro/quality/`.
+Preserve existing reusable tool environments, including `python-quality/`.
+Do not write Ouro artifacts to the repository root, `.agent-work/`, or `/tmp`.
+Do not move or delete existing artifacts without explicit approval.
+
+Use `run_path`, `result_path`, and report paths from the CLI JSON response.
+Read existing reports instead of saving duplicate CLI output.
+For follow-up commands, create `logs/`, `diagnostics/`, or `scratch/` inside
+that returned `run_path`. Use unique filenames and preserve existing run files.
+Do not redirect or pipe command output to `.ouro/<name>.json` or `.ouro/<name>.log`.
+If no run exists yet, keep command output in the session until the CLI returns
+a run path. If a command fails, report its exit status and the diagnostic path.
+Do not hide a failure with an output pipeline.
 
 ## Run and consume quality
 
@@ -174,8 +187,8 @@ if [ -n "${OURO_BIN:-}" ]; then test -x "$OURO_BIN"; else command -v ouro; fi
 "${OURO_BIN:-ouro}" quality --root "$PWD" --json
 ```
 
-Use `--stage fast`, `--stage deep`, or `--stage strict` when a specific profile
-is required. Use `--plan --json` to inspect readiness without running gates.
+Without `--stage` or `quality.profile`, Ouro runs `fast`. Use `--stage fast`,
+`--stage deep`, or `--stage strict` when a specific profile is required. Use `--plan --json` to inspect readiness without running gates.
 
 Consume the JSON fields `status`, `run_path`, `result_path`, the aggregate
 `result`, and `summary`. Inspect the returned `run_path` for detailed gate

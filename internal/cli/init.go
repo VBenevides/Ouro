@@ -44,9 +44,6 @@ func selectQualityProfile(cfg config.Config, requestedLevel string) string {
 	if cfg.Quality.Profile != "" {
 		return cfg.Quality.Profile
 	}
-	if cfg.Quality.CodeQL.Enabled || cfg.Quality.Sonar.Enabled {
-		return "deep"
-	}
 	return "fast"
 }
 

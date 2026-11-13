@@ -147,6 +147,8 @@ type SonarConfig struct {
 	TokenEnv            string `yaml:"token_env"`
 	QualityGateRequired bool   `yaml:"quality_gate_required"`
 	GoCoveragePath      string `yaml:"-"`
+	// RunOutputDir is the run-scoped directory (relative to root) for scanner scratch data.
+	RunOutputDir string `yaml:"-" json:"-"`
 }
 
 type ToolsConfig struct {

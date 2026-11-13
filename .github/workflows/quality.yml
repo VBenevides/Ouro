@@ -32,9 +32,3 @@ jobs:
         run: go test -race ./...
       - name: Go static analysis
         run: go vet ./...
-      - uses: actions/setup-node@v4
-        with:
-          node-version: lts/*
-      - name: JavaScript tests
-        working-directory: pi-ouro
-        run: npm test

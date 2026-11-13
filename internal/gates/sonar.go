@@ -246,6 +246,9 @@ func (e *sonarExecution) runScanner() (process.Result, string, *SonarOutcome) {
 
 func (e *sonarExecution) prepareWorkingDirectory() error {
 	e.workingDirectory = filepath.Join(e.root, ".ouro", "quality", "sonarqube", "scanner")
+	if e.cfg.RunOutputDir != "" {
+		e.workingDirectory = filepath.Join(e.root, e.cfg.RunOutputDir, "scanner")
+	}
 	if err := verifySonarPath(e.root, e.workingDirectory); err != nil {
 		return err
 	}
@@ -272,7 +275,7 @@ func (e *sonarExecution) scannerConfig() ([]string, string, error) {
 		{"sonar.tests", "."},
 		{"sonar.test.inclusions", "**/*_test.go,**/test_*.py"},
 		{"sonar.exclusions", "**/*_test.go,**/test_*.py,**/.agent-work/**,**/.ruff_cache/**,**/__pycache__/**,**/.pytest_cache/**,**/.mypy_cache/**"},
-		{"sonar.coverage.exclusions", "pi-ouro/**,plugins/ouro/hooks/**,cmd/ouro/**"},
+		{"sonar.coverage.exclusions", "cmd/ouro/**"},
 	} {
 		if _, exists := e.settings.properties[argument.key]; !exists {
 			args = append(args, "-D"+argument.key+"="+argument.value)

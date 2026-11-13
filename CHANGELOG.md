@@ -2,6 +2,18 @@
 
 All notable changes to Ouro are documented here.
 
+## [0.1.4] - 2026-11-03
+
+### Bugfixes
+
+- Require run-specific reports, logs, diagnostics, and scratch files inside the corresponding run directory in both quality skills. Prohibit loose output files directly under `.ouro/`, except `config.yaml`.
+- Direct agent follow-up commands to paths returned by the CLI. Avoid duplicate output files, preserve command failures, and keep existing shared caches and tool environments unchanged.
+
+### Other
+
+- Document artifact writers, run-scoped storage, and shared scanner state. Require explicit approval before agents move or delete existing artifacts.
+- Add CLI regression tests for successful, failed, and repeated quality runs. Check artifact paths, separate run directories, unchanged previous results, and preserved shared state.
+
 ## [0.1.3] - 2026-10-15
 
 ### Bugfixes
